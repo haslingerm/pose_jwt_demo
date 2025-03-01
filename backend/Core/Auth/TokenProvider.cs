@@ -5,6 +5,7 @@ using System.Security.Cryptography;
 using System.Text;
 using JwtDemo.Core.Users;
 using Microsoft.Extensions.Options;
+using Microsoft.IdentityModel.JsonWebTokens;
 using Microsoft.IdentityModel.Tokens;
 using NodaTime;
 using NodaTime.Extensions;
@@ -71,11 +72,11 @@ internal sealed class TokenProvider(IOptions<AuthSettings> options, IClock clock
             Audience = _settings.TokenAudience
         };
 
-        var handler = new JwtSecurityTokenHandler();
-        var token = handler.CreateToken(descriptor);
-        var tokenStr = handler.WriteToken(token);
+        var handler = new JsonWebTokenHandler();
+        var token = handler.CreateToken(descriptor)
+            ?? throw new InvalidOperationException("Failed to create token");
 
-        return new ITokenProvider.TokenData(tokenStr, TokenType.AccessToken, expiration);
+        return new ITokenProvider.TokenData(token, TokenType.AccessToken, expiration);
     }
 
     private ITokenProvider.TokenData CreateRefreshToken(Instant now)
