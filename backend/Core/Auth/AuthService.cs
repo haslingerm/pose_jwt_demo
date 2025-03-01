@@ -14,7 +14,7 @@ public partial interface IAuthService
     public ValueTask<LoginResult> AttemptLogin(string username, string suppliedPlaintextPassword);
     public ValueTask<LoginResult> AttemptTokenRefresh(string username, string suppliedRefreshToken);
     public HashedPassword HashPassword(string plaintext);
-    public ValueTask<LogoutResult> AttemptLogout(string requestUsername, string requestRefreshToken);
+    public ValueTask<LogoutResult> AttemptLogout(string username, string refreshToken);
 
     [Union<Success<ITokenProvider.NewToken>, NotFound, Failure>]
     public readonly partial struct LoginResult;
