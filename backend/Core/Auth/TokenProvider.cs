@@ -1,5 +1,4 @@
 ﻿using System.Collections.Frozen;
-using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
@@ -55,9 +54,9 @@ internal sealed class TokenProvider(IOptions<AuthSettings> options, IClock clock
 
         IEnumerable<Claim> claims =
         [
-            new(ClaimTypes.Name, user.Username),
+            new(JwtRegisteredClaimNames.Name, user.Username),
             ..roleClaims[user.Role],
-            new(ClaimTypes.SerialNumber, Guid.NewGuid().ToString("N"))
+            new(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString("N"))
         ];
 
         var descriptor = new SecurityTokenDescriptor
@@ -113,7 +112,7 @@ internal sealed class TokenProvider(IOptions<AuthSettings> options, IClock clock
             var enumStr = Enum.GetName(r)
                           ?? throw new ArgumentOutOfRangeException(nameof(r), r, "Unknown role");
 
-            return new Claim(ClaimTypes.Role, enumStr);
+            return new Claim("role", enumStr);
         }
     }
 }

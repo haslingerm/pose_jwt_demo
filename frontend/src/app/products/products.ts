@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, inject, OnInit, signal, Signal, WritableSignal } from "@angular/core";
 import { MatCard } from "@angular/material/card";
-import { IProduct, ProductService } from "../../core/product/product.service";
+import { IProduct, ProductService } from "../../core/product/product-service";
 import { toSignal } from "@angular/core/rxjs-interop";
 import { firstValueFrom, from } from "rxjs";
 import {
@@ -15,8 +15,8 @@ import {
 import { MatIconButton } from "@angular/material/button";
 import { MatIcon } from "@angular/material/icon";
 import { MatDialog } from "@angular/material/dialog";
-import { ProductEditDialogComponent } from "./product-edit-dialog/product-edit-dialog.component";
-import { UserRole, UserService } from "../../core/user/user.service";
+import { ProductEditDialog } from "./product-edit-dialog/product-edit-dialog";
+import { UserRole, UserService } from "../../core/user/user-service";
 import { MatProgressBar } from "@angular/material/progress-bar";
 
 @Component({
@@ -38,10 +38,10 @@ import { MatProgressBar } from "@angular/material/progress-bar";
         MatIcon,
         MatProgressBar
     ],
-    templateUrl: "./products.component.html",
-    styleUrl: "./products.component.scss"
+    templateUrl: "./products.html",
+    styleUrl: "./products.scss"
 })
-export class ProductsComponent implements OnInit {
+export class Products implements OnInit {
   private readonly productService: ProductService = inject(ProductService);
   private readonly userService = inject(UserService);
   private readonly dialog = inject(MatDialog);
@@ -57,7 +57,7 @@ export class ProductsComponent implements OnInit {
     }
 
     const origPrice = product.price;
-    const dialogRef = this.dialog.open(ProductEditDialogComponent, {
+    const dialogRef = this.dialog.open(ProductEditDialog, {
       data: product
     });
 

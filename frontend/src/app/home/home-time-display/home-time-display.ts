@@ -3,7 +3,7 @@ import { DateTimeFormatter, LocalDateTime } from "@js-joda/core";
 import { HubConnection, HubConnectionBuilder } from "@microsoft/signalr";
 import { HUB_BASE_URL } from "../../../core/const";
 import { z } from "zod";
-import { AuthService } from "../../../core/auth/auth.service";
+import { AuthService } from "../../../core/auth/auth-service";
 import { MatCard, MatCardContent } from "@angular/material/card";
 
 @Component({
@@ -13,10 +13,10 @@ import { MatCard, MatCardContent } from "@angular/material/card";
         MatCard,
         MatCardContent
     ],
-    templateUrl: './home-time-display.component.html',
-    styleUrl: './home-time-display.component.scss'
+    templateUrl: './home-time-display.html',
+    styleUrl: './home-time-display.scss'
 })
-export class HomeTimeDisplayComponent implements OnInit, OnDestroy {
+export class HomeTimeDisplay implements OnInit, OnDestroy {
   private readonly authService: AuthService = inject(AuthService);
   private hubConnection: HubConnection | null = null;
   public readonly currentTime: WritableSignal<string> = signal('not yet received');
@@ -49,7 +49,12 @@ export class HomeTimeDisplayComponent implements OnInit, OnDestroy {
         }
       });
       this.hubConnection.onreconnected(_ => console.log("Reconnected to time hub"));
-      this.hubConnection.onclose(error => console.error("Connection to time hub closed", error));
+      this.hubConnection.onclose(error => {
+        if (error === undefined){
+          console.log("Connection to time hub closed");
+          return;
+        }
+        console.error("Connection to time hub closed due to error", error)});
     } catch (error) {
       console.error(error);
     }

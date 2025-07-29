@@ -1,5 +1,5 @@
 import { inject, Injectable } from "@angular/core";
-import { AuthService } from "../auth/auth.service";
+import { AuthService } from "../auth/auth-service";
 import { jwtDecode } from "jwt-decode";
 
 @Injectable({
@@ -49,14 +49,14 @@ export class UserService {
     }
 
     return {
-      username: decoded.unique_name,
+      username: decoded.name,
       role: role
     };
   }
 }
 
 interface IAccessToken {
-  unique_name: string;
+  name: string;
   role: string[];
 }
 

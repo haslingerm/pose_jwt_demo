@@ -13,8 +13,8 @@ import { MatError, MatFormField } from "@angular/material/form-field";
 import { MatButton } from "@angular/material/button";
 import { MatInput } from "@angular/material/input";
 import { FormBuilder, ReactiveFormsModule, Validators } from "@angular/forms";
-import { AuthService } from "../../core/auth/auth.service";
-import { UserService } from "../../core/user/user.service";
+import { AuthService } from "../../core/auth/auth-service";
+import { UserService } from "../../core/user/user-service";
 import { MatSnackBar } from "@angular/material/snack-bar";
 
 @Component({
@@ -32,10 +32,10 @@ import { MatSnackBar } from "@angular/material/snack-bar";
         MatInput,
         ReactiveFormsModule
     ],
-    templateUrl: './login.component.html',
-    styleUrl: './login.component.scss'
+    templateUrl: './login.html',
+    styleUrl: './login.scss'
 })
-export class LoginComponent implements OnInit {
+export class Login implements OnInit {
   private readonly fb = inject(FormBuilder);
   private readonly authService = inject(AuthService);
   private readonly userService = inject(UserService);

@@ -1,5 +1,5 @@
 import { ActivatedRouteSnapshot, CanActivateFn, RouterStateSnapshot } from "@angular/router";
-import { UserRole, UserService } from "../user/user.service";
+import { UserRole, UserService } from "../user/user-service";
 import { inject } from "@angular/core";
 import { MatSnackBar } from "@angular/material/snack-bar";
 

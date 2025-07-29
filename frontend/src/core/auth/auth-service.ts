@@ -1,12 +1,12 @@
 import { inject, Injectable } from "@angular/core";
-import { HttpClient, HttpContext } from "@angular/common/http";
+import { HttpClient, HttpContext, HttpErrorResponse, HttpStatusCode } from "@angular/common/http";
 import { TOKEN_INTERCEPTION_DISABLED } from "./interceptor";
 import { API_BASE_URL } from "../const";
-import { lastValueFrom } from "rxjs";
+import { firstValueFrom, lastValueFrom } from "rxjs";
 import { Duration, Instant } from "@js-joda/core";
 import { z } from "zod";
 import { LocalStorage } from "../shared/local-storage";
-import { UserService } from "../user/user.service";
+import { UserService } from "../user/user-service";
 
 @Injectable({
   providedIn: "root"
@@ -46,24 +46,25 @@ export class AuthService {
       username,
       password
     };
-    const response = await lastValueFrom(this.client.post(url, payload,
-      {
-        context: AuthService.getNoTokenContext(),
-        observe: "response"
-      }));
-
-    if (response.ok) {
+    try {
+      const response = await firstValueFrom(this.client.post(url, payload,
+        {
+          context: AuthService.getNoTokenContext(),
+          observe: "response"
+        }));
       const data = TokenResponseWire.parse(response.body);
       return this.saveReceivedTokens(data);
+    } catch (error) {
+      if (error instanceof HttpErrorResponse) {
+        if (error.status === HttpStatusCode.Unauthorized) {
+          console.log("Username or password incorrect");
+        } else {
+          console.error(`Failed to login: ${error.status}`);
+        }
+        return null;
+      }
+      throw error;
     }
-
-    if (response.status === 401) {
-      console.log("Username or password incorrect");
-    } else {
-      console.error(`Failed to login: ${response.status}`);
-    }
-
-    return null;
   }
 
   public async logout(): Promise<void> {
@@ -90,17 +91,23 @@ export class AuthService {
     }
 
     const url = `${this.baseUrl}/logouts`;
-    const response = await lastValueFrom(this.client.post(url, {
+    try {
+      const payload = {
         username,
         refreshToken: refreshToken.token
-      },
-      {
-        context: AuthService.getNoTokenContext(),
-        observe: "response"
-      }));
-
-    if (response.ok) {
+      };
+      await firstValueFrom(this.client.post(url, payload,
+        {
+          context: AuthService.getNoTokenContext()
+        }));
       console.log("Logged out successfully from backend");
+    } catch (error) {
+      if (error instanceof HttpErrorResponse) {
+        console.error(`Failed to logout: ${error.status}`);
+      } else {
+        throw error;
+      }
+
     }
   }
 
@@ -133,23 +140,24 @@ export class AuthService {
       username: username,
       refreshToken: refreshToken.token
     };
-    const response = await lastValueFrom(this.client.post(url, payload,
-      {
-        context: AuthService.getNoTokenContext(),
-        observe: "response"
-      }));
-
-    if (response.ok) {
+    try {
+      const response = await firstValueFrom(this.client.post(url, payload,
+        {
+          context: AuthService.getNoTokenContext(),
+          observe: "response"
+        }));
       return this.saveReceivedTokens(TokenResponseWire.parse(response.body));
+    } catch (error) {
+      if (error instanceof HttpErrorResponse) {
+        if (error.status === HttpStatusCode.Unauthorized) {
+          console.log("Refresh token invalid");
+        } else {
+          console.error(`Failed to refresh token: ${error.status}`);
+        }
+        return null;
+      }
+      throw error;
     }
-
-    if (response.status === 401) {
-      console.log("Refresh token invalid");
-    } else {
-      console.error(`Failed to refresh token: ${response.status}`);
-    }
-
-    return null;
   }
 
   private saveReceivedTokens(data: TokenResponse): IToken {

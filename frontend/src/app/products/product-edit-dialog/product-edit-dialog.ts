@@ -10,7 +10,7 @@ import { MatFormField, MatLabel } from "@angular/material/form-field";
 import { MatButton } from "@angular/material/button";
 import { MatInput } from "@angular/material/input";
 import { FormsModule, ReactiveFormsModule } from "@angular/forms";
-import { IProduct } from "../../../core/product/product.service";
+import { IProduct } from "../../../core/product/product-service";
 
 @Component({
     selector: 'app-product-edit-dialog',
@@ -27,11 +27,11 @@ import { IProduct } from "../../../core/product/product.service";
         MatDialogClose,
         FormsModule
     ],
-    templateUrl: './product-edit-dialog.component.html',
-    styleUrl: './product-edit-dialog.component.scss'
+    templateUrl: './product-edit-dialog.html',
+    styleUrl: './product-edit-dialog.scss'
 })
-export class ProductEditDialogComponent {
-  public readonly dialogRef: MatDialogRef<ProductEditDialogComponent> = inject(MatDialogRef<ProductEditDialogComponent>);
+export class ProductEditDialog {
+  public readonly dialogRef: MatDialogRef<ProductEditDialog> = inject(MatDialogRef<ProductEditDialog>);
   public readonly product: IProduct = inject(MAT_DIALOG_DATA);
 
   onNoClick(): void {

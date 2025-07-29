@@ -1,8 +1,7 @@
 import { ChangeDetectionStrategy, Component, computed, inject, Signal } from "@angular/core";
 import { RouterLink, RouterOutlet } from "@angular/router";
 import { MatToolbar } from "@angular/material/toolbar";
-import { MatButton, MatIconButton } from "@angular/material/button";
-import { AsyncPipe } from "@angular/common";
+import { MatIconButton } from "@angular/material/button";
 import { MatIcon } from "@angular/material/icon";
 import { MatListItem, MatNavList } from "@angular/material/list";
 import { MatSidenav, MatSidenavContainer, MatSidenavContent } from "@angular/material/sidenav";
@@ -14,10 +13,10 @@ import { toSignal } from "@angular/core/rxjs-interop";
     selector: "app-root",
     changeDetection: ChangeDetectionStrategy.OnPush,
     imports: [RouterOutlet, MatToolbar, MatIcon, MatIconButton, MatListItem, MatNavList, MatSidenav, MatSidenavContainer, MatSidenavContent, RouterLink, RouterOutlet],
-    templateUrl: "./app.component.html",
-    styleUrl: "./app.component.scss"
+    templateUrl: "./app.html",
+    styleUrl: "./app.scss"
 })
-export class AppComponent {
+export class App {
   public readonly title: string = "JWT Demo";
   public showTitleInSidenav: Signal<boolean> = computed(() => !this.showTitleInMainToolbar());
   private readonly breakpointObserver = inject(BreakpointObserver);

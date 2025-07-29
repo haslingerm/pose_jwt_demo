@@ -1,7 +1,7 @@
 import { HttpContextToken, HttpEvent, HttpHandlerFn, HttpRequest } from "@angular/common/http";
 import { from, lastValueFrom, Observable } from "rxjs";
 import { inject } from "@angular/core";
-import { AuthService } from "./auth.service";
+import { AuthService } from "./auth-service";
 
 export const TOKEN_INTERCEPTION_DISABLED = new HttpContextToken<boolean>(() =>  false);
 export function tokenInterceptor(req: HttpRequest<unknown>, next: HttpHandlerFn): Observable<HttpEvent<unknown>> {

@@ -36,3 +36,5 @@ This demo project shows you:
 ** Using token with SignalR connection
 
 CAUTION: As mentioned before, security is hard, and for this demo some shortcuts have been taken. You may use it as a starting point, but don't deploy it as is!
+
+TIP: You might have to trust the ASP.NET Development Certificate in your OS, which is then usually trusted by the browser as well -- otherwise you could get 'CORS' errors that are actually 'browser rejects certificate' errors.

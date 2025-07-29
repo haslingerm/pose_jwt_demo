@@ -1,10 +1,11 @@
+@let loggedIn = isLoggedIn();
 <form [formGroup]="loginForm" novalidate (ngSubmit)="submit()">
   <mat-card class="login-card">
     <mat-card-header>
       <mat-card-title>Login</mat-card-title>
     </mat-card-header>
     <mat-card-content>
-      @if (!isLoggedIn()) {
+      @if (!loggedIn) {
         <div class="row">
           <div class="col">
             <mat-form-field class="full-width">
@@ -32,12 +33,12 @@
       }
     </mat-card-content>
     <mat-card-actions class="actions">
-      <button mat-raised-button color="primary" type="submit" [disabled]="isLoggedIn()">
-        Login
-      </button>
-      <button mat-raised-button color="secondary" [disabled]="!isLoggedIn()"
+      <button mat-raised-button color="secondary" [disabled]="!loggedIn"
               (click)="logout(); $event.preventDefault();">
         Logout</button>
+      <button mat-raised-button color="primary" type="submit" [disabled]="loggedIn">
+        Login
+      </button>
     </mat-card-actions>
   </mat-card>
 </form>

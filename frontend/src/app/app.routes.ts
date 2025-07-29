@@ -1,13 +1,13 @@
 import { Routes } from '@angular/router';
-import { LoginComponent } from "./login/login.component";
-import { HomeComponent } from "./home/home.component";
-import { ProductsComponent } from "./products/products.component";
+import { Login } from "./login/login";
+import { Home } from "./home/home";
+import { Products } from "./products/products";
 import { roleGuard } from "../core/auth/role.guard";
-import { UserRole } from "../core/user/user.service";
+import { UserRole } from "../core/user/user-service";
 
 export const routes: Routes = [
-  { path: 'login', component: LoginComponent },
-  { path: 'home', component: HomeComponent },
-  { path: 'products', component: ProductsComponent, canActivate: [roleGuard(UserRole.User)] },
+  { path: 'login', component: Login },
+  { path: 'home', component: Home },
+  { path: 'products', component: Products, canActivate: [roleGuard(UserRole.User)] },
   { path: '', redirectTo: '/home', pathMatch: 'full' },
 ];
