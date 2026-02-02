@@ -47,6 +47,6 @@ app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapControllers();
-app.MapHub<TimeHub>("hubs/time");
+app.MapHub<TimeHub>("hubs/time").RequireCors(Setup.CorsPolicyName);
 
 app.Run();

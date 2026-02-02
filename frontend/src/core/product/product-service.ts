@@ -88,8 +88,8 @@ export interface IProduct {
 }
 
 const ProductWire = z.object({
-  id: z.int(),
+  id: z.number(),
   name: z.string().min(1),
-  price: z.int()
+  price: z.number()
 });
 const ProductsWire = z.array(ProductWire);

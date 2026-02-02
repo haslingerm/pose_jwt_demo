@@ -38,7 +38,7 @@
             (click)="logout(); $event.preventDefault();">
       Logout
     </button>
-    <button mat-raised-button color="primary" type="submit" [disabled]="loggedIn">
+    <button mat-raised-button color="primary" [disabled]="loggedIn" (click)="submit()">
       Login
     </button>
   </mat-card-actions>
