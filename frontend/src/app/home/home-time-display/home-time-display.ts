@@ -8,7 +8,6 @@ import { MatCard, MatCardContent } from "@angular/material/card";
 
 @Component({
     selector: 'app-home-time-display',
-    changeDetection: ChangeDetectionStrategy.OnPush,
     imports: [
         MatCard,
         MatCardContent

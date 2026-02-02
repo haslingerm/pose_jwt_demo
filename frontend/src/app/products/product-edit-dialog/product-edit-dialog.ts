@@ -14,7 +14,6 @@ import { IProduct } from "../../../core/product/product-service";
 
 @Component({
     selector: 'app-product-edit-dialog',
-    changeDetection: ChangeDetectionStrategy.OnPush,
     imports: [
         MatDialogTitle,
         MatDialogContent,

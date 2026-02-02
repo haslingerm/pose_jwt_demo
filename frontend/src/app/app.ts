@@ -11,7 +11,6 @@ import { toSignal } from "@angular/core/rxjs-interop";
 
 @Component({
     selector: "app-root",
-    changeDetection: ChangeDetectionStrategy.OnPush,
     imports: [RouterOutlet, MatToolbar, MatIcon, MatIconButton, MatListItem, MatNavList, MatSidenav, MatSidenavContainer, MatSidenavContent, RouterLink, RouterOutlet],
     templateUrl: "./app.html",
     styleUrl: "./app.scss"

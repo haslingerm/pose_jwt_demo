@@ -1,5 +1,4 @@
 import {
-  ChangeDetectionStrategy,
   Component,
   computed,
   inject,
@@ -12,14 +11,13 @@ import { MatCard, MatCardActions, MatCardContent, MatCardHeader, MatCardTitle } 
 import { MatError, MatFormField } from "@angular/material/form-field";
 import { MatButton } from "@angular/material/button";
 import { MatInput } from "@angular/material/input";
-import { FormBuilder, ReactiveFormsModule, Validators } from "@angular/forms";
 import { AuthService } from "../../core/auth/auth-service";
 import { UserService } from "../../core/user/user-service";
 import { MatSnackBar } from "@angular/material/snack-bar";
+import { form, required, submit, FormField } from "@angular/forms/signals";
 
 @Component({
     selector: 'app-login',
-    changeDetection: ChangeDetectionStrategy.OnPush,
     imports: [
         MatCard,
         MatCardHeader,
@@ -30,22 +28,26 @@ import { MatSnackBar } from "@angular/material/snack-bar";
         MatCardActions,
         MatButton,
         MatInput,
-        ReactiveFormsModule
+        FormField
     ],
     templateUrl: './login.html',
     styleUrl: './login.scss'
 })
 export class Login implements OnInit {
-  private readonly fb = inject(FormBuilder);
+  private static readonly DEFAULT_LOGIN_FORM_MODEL: LoginFormModel = {
+    username: '',
+    password: ''
+  };
   private readonly authService = inject(AuthService);
   private readonly userService = inject(UserService);
   private readonly snackbarService = inject(MatSnackBar);
 
   public readonly userName: WritableSignal<string | null> = signal(null);
   public readonly isLoggedIn: Signal<boolean> = computed(() => this.userName() !== null);
-  public loginForm = this.fb.group({
-    username: ['', Validators.required],
-    password: ['', Validators.required]
+  private readonly loginFormModel: WritableSignal<LoginFormModel> = signal(Login.DEFAULT_LOGIN_FORM_MODEL);
+  protected readonly loginForm = form(this.loginFormModel, path => {
+    required(path.username, {message: 'Username is required'});
+    required(path.password, {message: 'Password is required'});
   });
 
   public async ngOnInit(): Promise<void> {
@@ -53,19 +55,22 @@ export class Login implements OnInit {
   }
 
   public async submit(): Promise<void> {
-    const data: ILoginRequest = this.loginForm.value as ILoginRequest;
-    const result = await this.authService.login(data.username, data.password);
-    if (result) {
-      await this.doLoginCheck();
-    } else {
-      this.snackbarService.open("Login failed!", "Close", {duration: 2000});
-    }
+    await submit(this.loginForm, async form => {
+      const data = form().value();
+      const result = await this.authService.login(data.username, data.password);
+      if (result) {
+        await this.doLoginCheck();
+      } else {
+        this.snackbarService.open("Login failed!", "Close", {duration: 2000});
+      }
+    });
   }
 
   public async logout(): Promise<void> {
     await this.authService.logout();
     this.userName.set(null);
-    this.loginForm.reset();
+    this.loginFormModel.set(Login.DEFAULT_LOGIN_FORM_MODEL);
+    this.loginForm().reset();
   }
 
   private async doLoginCheck(): Promise<void> {
@@ -74,7 +79,7 @@ export class Login implements OnInit {
   }
 }
 
-interface ILoginRequest {
+type LoginFormModel = {
   username: string;
   password: string;
 }

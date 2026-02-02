@@ -9,7 +9,6 @@ import { HomeTimeDisplay } from "./home-time-display/home-time-display";
     imports: [
         HomeTimeDisplay
     ],
-    changeDetection: ChangeDetectionStrategy.OnPush,
     templateUrl: './home.html',
     styleUrl: './home.scss'
 })

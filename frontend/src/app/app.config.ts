@@ -2,7 +2,7 @@ import {
   ApplicationConfig,
   provideZonelessChangeDetection,
 } from "@angular/core";
-import { provideRouter } from '@angular/router';
+import { provideRouter, withComponentInputBinding } from "@angular/router";
 
 import { routes } from './app.routes';
 import { provideAnimationsAsync } from '@angular/platform-browser/animations/async';
@@ -11,9 +11,7 @@ import { tokenInterceptor } from "../core/auth/interceptor";
 
 export const appConfig: ApplicationConfig = {
   providers: [
-    provideZonelessChangeDetection(),
-    provideRouter(routes),
+    provideRouter(routes, withComponentInputBinding()),
     provideHttpClient(withInterceptors([tokenInterceptor])),
-    provideAnimationsAsync()
   ]
 };

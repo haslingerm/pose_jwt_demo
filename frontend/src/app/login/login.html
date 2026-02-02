@@ -1,17 +1,17 @@
 @let loggedIn = isLoggedIn();
-<form [formGroup]="loginForm" novalidate (ngSubmit)="submit()">
-  <mat-card class="login-card">
-    <mat-card-header>
-      <mat-card-title>Login</mat-card-title>
-    </mat-card-header>
-    <mat-card-content>
+<mat-card class="login-card">
+  <mat-card-header>
+    <mat-card-title>Login</mat-card-title>
+  </mat-card-header>
+  <mat-card-content>
+    <form>
       @if (!loggedIn) {
         <div class="row">
           <div class="col">
             <mat-form-field class="full-width">
-              <input matInput placeholder="Username" formControlName="username">
-              @if (loginForm.controls['username'].hasError('required')) {
-                <mat-error>Username is <strong>required</strong></mat-error>
+              <input matInput placeholder="Username" [formField]="loginForm.username">
+              @for (error of loginForm.username().errors(); track error) {
+                <mat-error>{{ error }}</mat-error>
               }
             </mat-form-field>
           </div>
@@ -19,9 +19,9 @@
         <div class="row">
           <div class="col">
             <mat-form-field class="full-width">
-              <input matInput placeholder="Password" formControlName="password" type="password">
-              @if (loginForm.controls['password'].hasError('required')) {
-                <mat-error>Password is <strong>required</strong></mat-error>
+              <input matInput placeholder="Password" [formField]="loginForm.password" type="password">
+              @for (error of loginForm.password().errors(); track error) {
+                <mat-error>{{ error }}</mat-error>
               }
             </mat-form-field>
           </div>
@@ -31,14 +31,15 @@
           You are logged in as {{ userName() }}
         </div>
       }
-    </mat-card-content>
-    <mat-card-actions class="actions">
-      <button mat-raised-button color="secondary" [disabled]="!loggedIn"
-              (click)="logout(); $event.preventDefault();">
-        Logout</button>
-      <button mat-raised-button color="primary" type="submit" [disabled]="loggedIn">
-        Login
-      </button>
-    </mat-card-actions>
-  </mat-card>
-</form>
+    </form>
+  </mat-card-content>
+  <mat-card-actions class="actions">
+    <button mat-raised-button color="secondary" [disabled]="!loggedIn"
+            (click)="logout(); $event.preventDefault();">
+      Logout
+    </button>
+    <button mat-raised-button color="primary" type="submit" [disabled]="loggedIn">
+      Login
+    </button>
+  </mat-card-actions>
+</mat-card>
