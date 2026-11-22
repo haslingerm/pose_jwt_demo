@@ -1,9 +1,14 @@
 ﻿using System.Threading.RateLimiting;
+using FluentValidation;
 using JwtDemo.Core.Auth;
 using JwtDemo.Core.Products;
 using JwtDemo.Core.Users;
+using JwtDemo.Endpoints;
+using JwtDemo.Hubs;
+using JwtDemo.Util;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi;
@@ -16,6 +21,43 @@ public static class Setup
     public const string CorsPolicyName = "CorsPolicy";
     public const string AuthRateLimitPolicyName = "AuthRateLimitPolicy";
     public const string HubBasePath = "/hubs";
+
+    /// <summary>
+    ///     Aligns FluentValidation with the JSON contract (camelCase property names in validation problems)
+    /// </summary>
+    public static void ConfigureValidation()
+    {
+        ValidatorOptions.Global.PropertyNameResolver = (_, member, _) => member is null
+            ? null
+            : ValidationNaming.ToPropertyName(member.Name);
+
+        ValidatorOptions.Global.DisplayNameResolver = (_, member, _) => member is null
+            ? null
+            : ValidationNaming.ToDisplayName(member.Name);
+    }
+
+    extension(IEndpointRouteBuilder app)
+    {
+        /// <summary>
+        ///     Maps the endpoints of every resource of this API and the SignalR hub.
+        ///     One call per resource - explicit, no reflection.
+        /// </summary>
+        public void MapApplicationEndpoints(bool isDevelopment)
+        {
+            app.MapAuthEndpoints();
+            app.MapProductEndpoints();
+            app.MapUserEndpoints(isDevelopment);
+
+            app.MapHub<TimeHub>($"{HubBasePath}/time", o =>
+               {
+                   // SignalR checks the token only when the connection is established. Without this option,
+                   // a connection would stay authenticated forever, even after the access token expired.
+                   o.CloseOnAuthenticationExpiration = true;
+               })
+               // anonymous users may connect as well (they just get less frequent updates)
+               .AllowAnonymous();
+        }
+    }
 
     // C# 14 extension block: all members in here are extension members for IServiceCollection
     extension(IServiceCollection services)
@@ -113,6 +155,31 @@ public static class Setup
             {
                 authorization.AddPolicy(role, p => p.RequireRole(role));
             }
+        }
+
+        /// <summary>
+        ///     Unhandled exceptions are logged and answered with a generic RFC 9457 problem details response -
+        ///     the same error shape as failed validations, and without leaking any internals to the client
+        /// </summary>
+        public void ConfigureProblemDetails()
+        {
+            services.AddProblemDetails();
+            services.AddExceptionHandler<GlobalExceptionHandler>();
+        }
+
+        /// <summary>
+        ///     In production, the backend runs behind a reverse proxy which terminates TLS. Then the client IP
+        ///     (needed for rate limiting!) and the original scheme are only available from the X-Forwarded-* headers.
+        /// </summary>
+        public void ConfigureForwardedHeaders()
+        {
+            services.Configure<ForwardedHeadersOptions>(o =>
+            {
+                o.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+                // Only headers set by a trusted proxy are accepted - otherwise any client could fake its IP address.
+                // By default only a proxy on localhost is trusted: if the proxy runs elsewhere (e.g. another
+                // container), add its address to o.KnownProxies or its network to o.KnownIPNetworks.
+            });
         }
 
         public void ConfigureOpenApi()

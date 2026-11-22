@@ -45,8 +45,10 @@ public sealed class AuthSettings
             throw new InvalidOperationException(
                 $"""
                  The JWT signing key is missing or too short (min. {MinSigningKeyBytes} bytes).
-                 Set it as a user secret, e.g.:
+                 During development, set it as a user secret (see backend Readme), e.g.:
                    dotnet user-secrets set "{SectionKey}:{nameof(TokenSigningKey)}" "$(openssl rand -base64 48)"
+                 When deployed (user secrets are only loaded in the Development environment), provide it e.g. as
+                 environment variable {SectionKey}__{nameof(TokenSigningKey)} from your secret store.
                  """);
         }
 

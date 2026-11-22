@@ -1,6 +1,5 @@
 ﻿using JwtDemo.Core;
 using JwtDemo.Hubs;
-using JwtDemo.Model;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Options;
 using NodaTime;

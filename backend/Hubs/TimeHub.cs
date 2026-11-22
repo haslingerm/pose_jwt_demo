@@ -1,5 +1,5 @@
-﻿using JwtDemo.Model;
 using Microsoft.AspNetCore.SignalR;
+using NodaTime;
 
 namespace JwtDemo.Hubs;
 
@@ -24,4 +24,16 @@ public sealed class TimeHub : Hub<ITimeClient>
     }
 
     // no need to override OnDisconnectedAsync: SignalR removes closed connections from all groups automatically
+}
+
+public sealed class TimeUpdate
+{
+    public LocalDateTime CurrentTime { get; init; }
+    public TimeQuality Quality { get; init; }
+}
+
+public enum TimeQuality
+{
+    Low,
+    High
 }

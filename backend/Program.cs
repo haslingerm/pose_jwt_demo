@@ -1,27 +1,22 @@
-using System.Text.Json.Serialization;
 using JwtDemo.BackgroundServices;
 using JwtDemo.Core;
-using JwtDemo.Hubs;
-using Microsoft.AspNetCore.Mvc;
 using NodaTime;
 using NodaTime.Serialization.SystemTextJson;
 
 var builder = WebApplication.CreateBuilder(args);
 
-builder.Services.AddControllers();
-builder.Services.Configure<JsonOptions>(o =>
-{
-    o.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter());
-    o.JsonSerializerOptions.ConfigureForNodaTime(DateTimeZoneProviders.Tzdb);
-});
+var isDev = builder.Environment.IsDevelopment();
+
+// Minimal APIs use the HTTP JSON options (not the MVC ones, which only apply to controllers)
+builder.Services.ConfigureHttpJsonOptions(o => JsonConfig.ConfigureJsonSerialization(o.SerializerOptions, isDev));
 builder.Services.AddSignalR()
        .AddJsonProtocol(o =>
        {
            o.PayloadSerializerOptions.ConfigureForNodaTime(DateTimeZoneProviders.Tzdb);
        });
-// unhandled exceptions are logged and turned into a generic 500 ProblemDetails response (no stack traces for clients!)
-builder.Services.AddProblemDetails();
+builder.Services.ConfigureProblemDetails();
 builder.Services.ConfigureOpenApi();
+builder.Services.ConfigureForwardedHeaders();
 builder.Services.LoadConfiguration(builder.Configuration);
 builder.Services.RegisterServices();
 builder.Services.AddAuth(builder.Configuration);
@@ -29,24 +24,21 @@ builder.Services.AddRateLimiting();
 builder.Services.ConfigureCors(builder.Configuration);
 builder.Services.ConfigureDatabase(builder.Configuration);
 builder.Services.AddHostedService<TimeUpdateService>();
+Setup.ConfigureValidation();
 
 var app = builder.Build();
 
 await app.UpdateDatabase();
 
+// Not using HTTPS here: in production the backend _has_ to run behind a reverse proxy, which handles TLS (and HSTS).
+// Tokens are as good as passwords - they must never be sent unencrypted over a network!
+app.UseForwardedHeaders();
 app.UseExceptionHandler();
-app.UseStatusCodePages();
 
-if (app.Environment.IsDevelopment())
+if (isDev)
 {
     app.MapOpenApi().AllowAnonymous();
     app.UseSwaggerUI(o => o.SwaggerEndpoint("/openapi/v1.json", "JWT Demo"));
-}
-else
-{
-    // Tokens are as good as passwords - outside of local development they must only ever be sent via HTTPS
-    app.UseHsts();
-    app.UseHttpsRedirection();
 }
 
 app.UseCors(Setup.CorsPolicyName);
@@ -55,14 +47,6 @@ app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
 
-app.MapControllers();
-app.MapHub<TimeHub>($"{Setup.HubBasePath}/time", o =>
-   {
-       // SignalR checks the token only when the connection is established. Without this option, a connection
-       // would stay authenticated forever, even after the access token expired.
-       o.CloseOnAuthenticationExpiration = true;
-   })
-   // anonymous users may connect as well (they just get less frequent updates)
-   .AllowAnonymous();
+app.MapApplicationEndpoints(isDev);
 
-app.Run();
+await app.RunAsync();

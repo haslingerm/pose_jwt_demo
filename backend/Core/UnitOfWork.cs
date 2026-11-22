@@ -83,9 +83,9 @@ public static class TransactionProviderExtensions
     {
         /// <summary>
         ///     Commits the transaction, then returns the given result - handy in switch expressions:
-        ///     <c>Success => await transaction.CommitAndReturn(NoContent())</c>
+        ///     <c>Success => await transaction.CommitAndReturnAsync(TypedResults.NoContent())</c>
         /// </summary>
-        public async ValueTask<TResult> CommitAndReturn<TResult>(TResult result)
+        public async ValueTask<TResult> CommitAndReturnAsync<TResult>(TResult result)
         {
             await transaction.CommitAsync();
 

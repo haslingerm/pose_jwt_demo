@@ -44,7 +44,7 @@ public sealed class DatabaseContext(DbContextOptions<DatabaseContext> options) :
         user.HasKey(u => u.Id);
         user.Property(u => u.Id).ValueGeneratedOnAdd();
         // case-insensitive: otherwise 'Admin' and 'admin' could be registered as two different (confusable) users
-        user.Property(u => u.Username).HasMaxLength(60).UseCollation("NOCASE");
+        user.Property(u => u.Username).HasMaxLength(UserLimits.UsernameMaxLength).UseCollation("NOCASE");
         user.HasIndex(u => u.Username).IsUnique();
         user.HasMany(u => u.ActiveRefreshTokens)
             .WithOne()
