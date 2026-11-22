@@ -10,10 +10,19 @@
   background: inherit;
 }
 
-.mat-toolbar.mat-primary {
+mat-sidenav-content > .mat-toolbar {
   position: sticky;
   top: 0;
   z-index: 1;
+}
+
+.spacer {
+  flex: 1 1 auto;
+}
+
+.username {
+  margin-left: 0.5rem;
+  font-size: 1rem;
 }
 
 #main-container {

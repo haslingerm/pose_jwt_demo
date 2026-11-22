@@ -1,224 +1,186 @@
-import { inject, Injectable } from "@angular/core";
-import { HttpClient, HttpContext, HttpErrorResponse, HttpStatusCode } from "@angular/common/http";
-import { TOKEN_INTERCEPTION_DISABLED } from "./interceptor";
-import { API_BASE_URL } from "../const";
-import { firstValueFrom, lastValueFrom } from "rxjs";
-import { Duration, Instant } from "@js-joda/core";
-import { z } from "zod";
-import { LocalStorage } from "../shared/local-storage";
-import { UserService } from "../user/user-service";
+import { computed, inject, Injectable, Signal, signal } from '@angular/core';
+import { HttpClient, HttpContext, HttpErrorResponse, HttpStatusCode } from '@angular/common/http';
+import { firstValueFrom } from 'rxjs';
+import { Duration, Instant } from '@js-joda/core';
+import { z } from 'zod';
+import { TOKEN_INTERCEPTION_DISABLED } from './interceptor';
+import { API_BASE_URL } from '../const';
+import { LocalStorage } from '../shared/local-storage';
+import { decodeAccessToken } from './access-token';
+
+export type LoginResult = 'success' | 'invalidCredentials' | 'tooManyAttempts' | 'error';
 
 @Injectable({
-  providedIn: "root"
+  providedIn: 'root'
 })
 export class AuthService {
-
-  private static readonly accessTokenKey = "accessToken";
-  private static readonly refreshTokenKey = "refreshToken";
+  private static readonly tokensKey = 'tokens';
+  // refresh a bit before the access token expires, so it cannot expire while a request is on its way
   private static readonly expirationThreshold = Duration.ofMinutes(2);
   private readonly baseUrl = `${API_BASE_URL}/auth`;
   private readonly client = inject(HttpClient);
-  private readonly localStorage = new LocalStorage("Auth");
+  private readonly storage = new LocalStorage('Auth');
 
-  public async getAccessToken(): Promise<IToken | null> {
-    const accessToken = this.getToken(AuthService.accessTokenKey);
-    if (accessToken !== null) {
-      const expiration = new TokenExpiration(accessToken);
+  // The single source of truth for the login state. Everything else (current user, roles, ...) is derived from it,
+  // so the whole UI updates automatically when we log in, log out or a token refresh fails.
+  private readonly tokens = signal<ITokens | null>(this.loadTokens());
+  public readonly accessToken: Signal<IToken | null> = computed(() => this.tokens()?.accessToken ?? null);
 
-      // second condition also covers first, but I wanted to make the intent very clear
-      if (expiration.isExpired()
-        || expiration.isRemainingTimeShorterThan(AuthService.expirationThreshold)) {
-        return await this.tryTokenRefresh(accessToken);
-      }
+  // a refresh request which is currently running, see getAccessToken
+  private runningRefresh: Promise<ITokens | null> | null = null;
 
-      return accessToken;
+  /**
+   * Returns a valid access token - refreshing it first, if necessary.
+   * Returns null if the user is not logged in (anymore).
+   */
+  public async getAccessToken(): Promise<string | null> {
+    const tokens = this.tokens();
+    if (tokens === null) {
+      return null;
     }
 
-    return null;
+    if (!expiresWithin(tokens.accessToken, AuthService.expirationThreshold)) {
+      return tokens.accessToken.token;
+    }
+
+    // Several requests might need a new token at the same time (e.g. when a page loads).
+    // Each refresh token can only be used once (rotation), so there must only be a single refresh request:
+    // all callers wait for the same one.
+    this.runningRefresh ??= this.refreshTokens(tokens)
+      .finally(() => this.runningRefresh = null);
+
+    const newTokens = await this.runningRefresh;
+    return newTokens?.accessToken.token ?? null;
   }
 
-  public async login(username: string, password: string): Promise<IToken | null> {
-    const url = `${this.baseUrl}/logins`;
+  public async login(username: string, password: string): Promise<LoginResult> {
+    this.setTokens(null);
 
-    this.clearLocalStorage();
-
-    const payload = {
-      username,
-      password
-    };
     try {
-      const response = await firstValueFrom(this.client.post(url, payload,
-        {
-          context: AuthService.getNoTokenContext(),
-          observe: "response"
-        }));
-      const data = TokenResponseWire.parse(response.body);
-      return this.saveReceivedTokens(data);
+      const response = await firstValueFrom(this.client.post(`${this.baseUrl}/logins`, { username, password },
+        { context: AuthService.withoutToken() }));
+      this.setTokens(TokensWire.parse(response));
+      return 'success';
     } catch (error) {
-      if (error instanceof HttpErrorResponse) {
-        if (error.status === HttpStatusCode.Unauthorized) {
-          console.log("Username or password incorrect");
-        } else {
-          console.error(`Failed to login: ${error.status}`);
-        }
-        return null;
+      if (!(error instanceof HttpErrorResponse)) {
+        throw error;
       }
-      throw error;
+
+      switch (error.status) {
+        case HttpStatusCode.Unauthorized:
+          return 'invalidCredentials';
+        case HttpStatusCode.TooManyRequests:
+          return 'tooManyAttempts';
+        default:
+          console.error(`Failed to login: ${error.status}`);
+          return 'error';
+      }
     }
   }
 
   public async logout(): Promise<void> {
-    const accessToken = this.getToken(AuthService.accessTokenKey);
-    if (accessToken) {
-      await this.logoutFromBackend(accessToken);
+    const tokens = this.tokens();
+    // we always log out locally, even if the backend can't be reached
+    this.setTokens(null);
+
+    const username = tokens ? decodeAccessToken(tokens.accessToken.token)?.name : null;
+    if (!tokens || !username) {
+      return;
     }
 
-    this.clearLocalStorage();
+    // Log out at the backend as well, which revokes the refresh token.
+    // The access token stays valid until it expires (that's why its lifetime should be short).
+    try {
+      await firstValueFrom(this.client.post(`${this.baseUrl}/logouts`,
+        { username, refreshToken: tokens.refreshToken.token },
+        { context: AuthService.withoutToken() }));
+    } catch (error) {
+      if (!(error instanceof HttpErrorResponse)) {
+        throw error;
+      }
+      console.error(`Failed to logout at the backend: ${error.status}`);
+    }
   }
 
-  private async logoutFromBackend(accessToken: IToken): Promise<void> {
-    // we try to log out from the backend, which will invalidate the refresh token
-
-    const refreshToken = this.getToken(AuthService.refreshTokenKey);
-
-    if (!refreshToken) {
-      return;
+  private async refreshTokens(tokens: ITokens): Promise<ITokens | null> {
+    const username = decodeAccessToken(tokens.accessToken.token)?.name;
+    if (isExpired(tokens.refreshToken) || !username) {
+      console.log('Refresh token expired - user has to log in again');
+      this.setTokens(null);
+      return null;
     }
 
-    const username = UserService.decodeToken(accessToken.token)?.username;
-    if (!username) {
-      return;
-    }
-
-    const url = `${this.baseUrl}/logouts`;
     try {
-      const payload = {
-        username,
-        refreshToken: refreshToken.token
-      };
-      await firstValueFrom(this.client.post(url, payload,
-        {
-          context: AuthService.getNoTokenContext()
-        }));
-      console.log("Logged out successfully from backend");
+      const response = await firstValueFrom(this.client.post(`${this.baseUrl}/token-refreshes`,
+        { username, refreshToken: tokens.refreshToken.token },
+        { context: AuthService.withoutToken() }));
+      const newTokens = TokensWire.parse(response);
+      this.setTokens(newTokens);
+      return newTokens;
     } catch (error) {
-      if (error instanceof HttpErrorResponse) {
-        console.error(`Failed to logout: ${error.status}`);
-      } else {
+      if (!(error instanceof HttpErrorResponse)) {
         throw error;
       }
 
-    }
-  }
-
-  private clearLocalStorage(): void {
-    this.localStorage.remove(AuthService.accessTokenKey);
-    this.localStorage.remove(AuthService.refreshTokenKey);
-  }
-
-  private async tryTokenRefresh(accessToken: IToken): Promise<IToken | null> {
-    const refreshToken = this.getToken(AuthService.refreshTokenKey);
-    if (refreshToken === null) {
-      console.log("No refresh token available");
-      return null;
-    }
-
-    const expiration = new TokenExpiration(refreshToken);
-    if (expiration.isExpired()) {
-      console.log("Refresh token expired");
-      return null;
-    }
-
-    const username = UserService.decodeToken(accessToken.token)?.username;
-    if (!username) {
-      console.error("Failed to decode username from access token");
-      return null;
-    }
-
-    const url = `${this.baseUrl}/token-refreshes`;
-    const payload = {
-      username: username,
-      refreshToken: refreshToken.token
-    };
-    try {
-      const response = await firstValueFrom(this.client.post(url, payload,
-        {
-          context: AuthService.getNoTokenContext(),
-          observe: "response"
-        }));
-      return this.saveReceivedTokens(TokenResponseWire.parse(response.body));
-    } catch (error) {
-      if (error instanceof HttpErrorResponse) {
-        if (error.status === HttpStatusCode.Unauthorized) {
-          console.log("Refresh token invalid");
-        } else {
-          console.error(`Failed to refresh token: ${error.status}`);
-        }
-        return null;
+      if (error.status === HttpStatusCode.Unauthorized) {
+        // the refresh token was revoked (e.g. logout in another tab) - we are logged out
+        console.log('Refresh token invalid - user has to log in again');
+        this.setTokens(null);
+      } else {
+        // e.g. backend not reachable - keep the tokens, maybe it works next time
+        console.error(`Failed to refresh token: ${error.status}`);
       }
-      throw error;
+      return null;
     }
   }
 
-  private saveReceivedTokens(data: TokenResponse): IToken {
-    const accessToken = data.accessToken as IToken;
-    const refreshToken = data.refreshToken as IToken;
-
-    this.localStorage.set(AuthService.accessTokenKey, accessToken);
-    this.localStorage.set(AuthService.refreshTokenKey, refreshToken);
-
-    return accessToken;
-  }
-
-  private getToken(key: string): IToken | null {
-    const rawToken = this.localStorage.get<IToken>(key);
-    if (rawToken) {
-      return TokenDataWire.parse(rawToken) as IToken;
+  private setTokens(tokens: ITokens | null): void {
+    this.tokens.set(tokens);
+    if (tokens) {
+      // Local storage is easy to use and survives page reloads, but it can be read by any JavaScript running on
+      // our page - so an XSS vulnerability would allow an attacker to steal the tokens.
+      // An alternative is to keep the refresh token in an HttpOnly cookie, which JavaScript cannot access at all
+      // (requires more backend work and CSRF protection) - see the Readme.
+      this.storage.set(AuthService.tokensKey, tokens);
+    } else {
+      this.storage.remove(AuthService.tokensKey);
     }
-
-    return null;
   }
 
-  private static getNoTokenContext(): HttpContext {
+  private loadTokens(): ITokens | null {
+    try {
+      const result = TokensWire.safeParse(this.storage.get(AuthService.tokensKey));
+      // no need to keep tokens which cannot be refreshed anymore
+      return result.success && !isExpired(result.data.refreshToken) ? result.data : null;
+    } catch {
+      // e.g. invalid date format
+      return null;
+    }
+  }
+
+  private static withoutToken(): HttpContext {
+    // we don't send the access token to the auth endpoints, the credentials are in the request body
     return new HttpContext().set(TOKEN_INTERCEPTION_DISABLED, true);
   }
 }
 
-export interface IToken {
-  token: string;
-  expiration: Instant;
+function isExpired(token: IToken): boolean {
+  return Instant.now().isAfter(token.expiration);
 }
 
-const TokenDataWire = z.object({
-  token: z.string(),
+function expiresWithin(token: IToken, duration: Duration): boolean {
+  return Instant.now().plus(duration).isAfter(token.expiration);
+}
+
+const TokenWire = z.object({
+  token: z.string().min(1),
   expiration: z.string().transform(s => Instant.parse(s))
 });
 
-type TokenResponse = z.infer<typeof TokenResponseWire>;
-
-const TokenResponseWire = z.object({
-  accessToken: TokenDataWire,
-  refreshToken: TokenDataWire
+const TokensWire = z.object({
+  accessToken: TokenWire,
+  refreshToken: TokenWire
 });
 
-class TokenExpiration {
-
-  private readonly now;
-
-  constructor(private readonly token: IToken) {
-    this.now = Instant.now();
-  }
-
-  public isExpired(): boolean {
-    return this.now.isAfter(this.token.expiration);
-  }
-
-  public isRemainingTimeShorterThan(duration: Duration): boolean {
-    return this.timeUntilExpiration().minus(duration).isNegative();
-  }
-
-  private timeUntilExpiration(): Duration {
-    return Duration.between(this.now, this.token.expiration);
-  }
-
-}
+export type IToken = z.infer<typeof TokenWire>;
+type ITokens = z.infer<typeof TokensWire>;

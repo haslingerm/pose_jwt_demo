@@ -1,100 +1,91 @@
-import { ChangeDetectionStrategy, Component, inject, OnDestroy, OnInit, signal, WritableSignal } from "@angular/core";
-import { DateTimeFormatter, LocalDateTime } from "@js-joda/core";
-import { HubConnection, HubConnectionBuilder } from "@microsoft/signalr";
-import { HUB_BASE_URL } from "../../../core/const";
-import { z } from "zod";
-import { AuthService } from "../../../core/auth/auth-service";
-import { MatCard, MatCardContent } from "@angular/material/card";
+import { Component, DestroyRef, inject, signal } from '@angular/core';
+import { DateTimeFormatter, LocalDateTime } from '@js-joda/core';
+import { HubConnection, HubConnectionBuilder } from '@microsoft/signalr';
+import { z } from 'zod';
+import { MatCard, MatCardContent } from '@angular/material/card';
+import { HUB_BASE_URL } from '../../../core/const';
+import { AuthService } from '../../../core/auth/auth-service';
 
 @Component({
-    selector: 'app-home-time-display',
-    imports: [
-        MatCard,
-        MatCardContent
-    ],
-    templateUrl: './home-time-display.html',
-    styleUrl: './home-time-display.scss'
+  selector: 'app-home-time-display',
+  imports: [
+    MatCard,
+    MatCardContent
+  ],
+  templateUrl: './home-time-display.html',
+  styleUrl: './home-time-display.scss'
 })
-export class HomeTimeDisplay implements OnInit, OnDestroy {
-  private readonly authService: AuthService = inject(AuthService);
-  private hubConnection: HubConnection | null = null;
-  public readonly currentTime: WritableSignal<string> = signal('not yet received');
+export class HomeTimeDisplay {
+  private static readonly timeFormatter = DateTimeFormatter.ofPattern('HH:mm:ss');
+  private readonly authService = inject(AuthService);
+  private readonly hubConnection: HubConnection;
+  private destroyed = false;
 
-  public async ngOnInit(): Promise<void> {
+  protected readonly currentTime = signal('not yet received');
+
+  constructor() {
     this.hubConnection = new HubConnectionBuilder()
       .withUrl(`${HUB_BASE_URL}/time`, {
-        accessTokenFactory: async () => {
-          // we don't have to worry about refresh, the token is needed for initial connection only
-          // that also means, that you have to keep in mind that active websocket connections
-          // will not be closed automatically when the token expires - if that is important
-          // you have to add extra logic in the hub to handle that case
-          const token = await this.authService.getAccessToken();
-          return token?.token ?? "";
-        }
+        // Called whenever a connection is established - browsers cannot send an Authorization header with
+        // WebSockets, so the token is sent in the query string (see backend: JwtBearerEvents.OnMessageReceived).
+        // An empty token = anonymous connection.
+        accessTokenFactory: async () => await this.authService.getAccessToken() ?? '',
+        // the token is sent explicitly, we don't need cookies (and the backend CORS policy doesn't allow them)
+        withCredentials: false
       })
+      .withAutomaticReconnect()
       .build();
 
+    // register handlers before starting, so we don't miss any message
+    this.hubConnection.on('ReceiveTime', (data: unknown) => {
+      const formattedTime = HomeTimeDisplay.formatTimeUpdate(data);
+      if (formattedTime) {
+        this.currentTime.set(formattedTime);
+      }
+    });
+    this.hubConnection.onreconnecting(() => this.currentTime.set('reconnecting...'));
+    this.hubConnection.onreconnected(() => console.log('Reconnected to time hub'));
+    this.hubConnection.onclose(error => {
+      if (this.destroyed) {
+        return;
+      }
+      // The backend closes the connection when the access token expires (CloseOnAuthenticationExpiration).
+      // We simply connect again - which fetches a fresh token (or connects anonymously after a logout).
+      console.log('Connection to time hub closed, reconnecting', error);
+      setTimeout(() => this.connect(), 1000);
+    });
+
+    inject(DestroyRef).onDestroy(() => {
+      this.destroyed = true;
+      void this.hubConnection.stop();
+    });
+
+    void this.connect();
+  }
+
+  private async connect(): Promise<void> {
+    if (this.destroyed) {
+      return;
+    }
     try {
       await this.hubConnection.start();
-      console.log("Connected to time hub");
-
       this.currentTime.set('connected and waiting');
-
-      this.hubConnection.on("ReceiveTime", (data: unknown) => {
-        const processor = new TimeUpdateProcessor(data);
-        const formattedTime = processor.process();
-        if (formattedTime) {
-          this.currentTime.set(formattedTime);
-        }
-      });
-      this.hubConnection.onreconnected(_ => console.log("Reconnected to time hub"));
-      this.hubConnection.onclose(error => {
-        if (error === undefined){
-          console.log("Connection to time hub closed");
-          return;
-        }
-        console.error("Connection to time hub closed due to error", error)});
     } catch (error) {
-      console.error(error);
+      console.error('Failed to connect to time hub', error);
+      this.currentTime.set('not connected');
     }
   }
 
-  public async ngOnDestroy(): Promise<void> {
-    await this.hubConnection?.stop();
-  }
-}
-
-class TimeUpdateProcessor{
-  private static readonly timeFormatter = DateTimeFormatter.ofPattern("HH:mm:ss");
-
-  constructor(private readonly rawData: unknown) {}
-
-  public process(): string | null{
-    const timeUpdate = TimeUpdateProcessor.parse(this.rawData);
-    if (!timeUpdate) {
+  private static formatTimeUpdate(data: unknown): string | null {
+    const result = TimeUpdateWire.safeParse(data);
+    if (!result.success) {
+      console.error('Failed to parse time update', result.error);
       return null;
     }
 
-    return TimeUpdateProcessor.format(timeUpdate);
-  }
-
-  private static format(timeUpdate: ITimeUpdate): string {
-    const resolutionLevel = timeUpdate.quality === TimeQuality.High
-      ? "high"
-      : "low";
-    const resolutionInfo = `(${resolutionLevel} resolution)`;
-    const formattedTime = timeUpdate.currentTime.format(TimeUpdateProcessor.timeFormatter);
-    return `${formattedTime} ${resolutionInfo}`;
-  }
-
-  private static parse(data: unknown): ITimeUpdate | null{
-    try {
-      return TimeUpdateWire.parse(data) as ITimeUpdate;
-    }
-    catch (error){
-      console.error("Failed to parse time update", error);
-      return null;
-    }
+    const { currentTime, quality } = result.data;
+    const resolution = quality === TimeQuality.High ? 'high' : 'low';
+    return `${currentTime.format(HomeTimeDisplay.timeFormatter)} (${resolution} resolution)`;
   }
 }
 
@@ -105,10 +96,5 @@ enum TimeQuality {
 
 const TimeUpdateWire = z.object({
   currentTime: z.string().transform(s => LocalDateTime.parse(s)),
-  quality: z.nativeEnum(TimeQuality)
+  quality: z.enum(TimeQuality)
 });
-
-interface ITimeUpdate {
-  currentTime: LocalDateTime;
-  quality: TimeQuality;
-}

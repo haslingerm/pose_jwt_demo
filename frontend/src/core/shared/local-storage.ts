@@ -6,12 +6,18 @@ export class LocalStorage {
     localStorage.setItem(this.getKey(key), JSON.stringify(value));
   }
 
-  public get<T>(key: string): T | null {
+  public get(key: string): unknown {
     const item = localStorage.getItem(this.getKey(key));
-    if (item) {
-      return JSON.parse(item);
+    if (item === null) {
+      return null;
     }
-    return null;
+
+    try {
+      return JSON.parse(item);
+    } catch {
+      // corrupted (or manually edited) value - treat it as missing
+      return null;
+    }
   }
 
   public remove(key: string): void {

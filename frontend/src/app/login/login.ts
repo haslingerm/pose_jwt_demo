@@ -1,81 +1,82 @@
-import {
-  Component,
-  computed,
-  inject,
-  OnInit,
-  signal,
-  Signal,
-  WritableSignal
-} from "@angular/core";
-import { MatCard, MatCardActions, MatCardContent, MatCardHeader, MatCardTitle } from "@angular/material/card";
-import { MatError, MatFormField } from "@angular/material/form-field";
-import { MatButton } from "@angular/material/button";
-import { MatInput } from "@angular/material/input";
-import { AuthService } from "../../core/auth/auth-service";
-import { UserService } from "../../core/user/user-service";
-import { MatSnackBar } from "@angular/material/snack-bar";
-import { form, required, submit, FormField } from "@angular/forms/signals";
+import { Component, computed, inject, signal } from '@angular/core';
+import { MatCard, MatCardActions, MatCardContent, MatCardHeader, MatCardTitle } from '@angular/material/card';
+import { MatError, MatFormField, MatLabel } from '@angular/material/form-field';
+import { MatButton } from '@angular/material/button';
+import { MatInput } from '@angular/material/input';
+import { form, FormField, FormRoot, required, ValidationError } from '@angular/forms/signals';
+import { AuthService, LoginResult } from '../../core/auth/auth-service';
+import { UserRole, UserService } from '../../core/user/user-service';
 
 @Component({
-    selector: 'app-login',
-    imports: [
-        MatCard,
-        MatCardHeader,
-        MatCardContent,
-        MatCardTitle,
-        MatError,
-        MatFormField,
-        MatCardActions,
-        MatButton,
-        MatInput,
-        FormField
-    ],
-    templateUrl: './login.html',
-    styleUrl: './login.scss'
+  selector: 'app-login',
+  imports: [
+    MatCard,
+    MatCardHeader,
+    MatCardContent,
+    MatCardTitle,
+    MatCardActions,
+    MatError,
+    MatFormField,
+    MatLabel,
+    MatButton,
+    MatInput,
+    FormField,
+    FormRoot
+  ],
+  templateUrl: './login.html',
+  styleUrl: './login.scss'
 })
-export class Login implements OnInit {
-  private static readonly DEFAULT_LOGIN_FORM_MODEL: LoginFormModel = {
-    username: '',
-    password: ''
-  };
+export class Login {
+  private static readonly emptyLoginModel: LoginFormModel = { username: '', password: '' };
   private readonly authService = inject(AuthService);
   private readonly userService = inject(UserService);
-  private readonly snackbarService = inject(MatSnackBar);
 
-  public readonly userName: WritableSignal<string | null> = signal(null);
-  public readonly isLoggedIn: Signal<boolean> = computed(() => this.userName() !== null);
-  private readonly loginFormModel: WritableSignal<LoginFormModel> = signal(Login.DEFAULT_LOGIN_FORM_MODEL);
-  protected readonly loginForm = form(this.loginFormModel, path => {
-    required(path.username, {message: 'Username is required'});
-    required(path.password, {message: 'Password is required'});
+  protected readonly user = this.userService.user;
+  protected readonly roleName = computed(() => {
+    const user = this.user();
+    return user ? UserRole[user.role] : null;
   });
 
-  public async ngOnInit(): Promise<void> {
-    await this.doLoginCheck();
-  }
+  private readonly loginModel = signal<LoginFormModel>(Login.emptyLoginModel);
+  protected readonly loginForm = form(this.loginModel, path => {
+    required(path.username, { message: 'Username is required' });
+    required(path.password, { message: 'Password is required' });
+  }, {
+    submission: {
+      // called by [formRoot] when the form is submitted (button or enter key) - only if the form is valid
+      action: async form => {
+        const { username, password } = form().value();
+        const result = await this.authService.login(username, password);
+        if (result === 'success') {
+          this.resetForm();
+          return undefined;
+        }
 
-  public async submit(): Promise<void> {
-    await submit(this.loginForm, async form => {
-      const data = form().value();
-      const result = await this.authService.login(data.username, data.password);
-      if (result) {
-        await this.doLoginCheck();
-      } else {
-        this.snackbarService.open("Login failed!", "Close", {duration: 2000});
+        // shown as an error of the whole form
+        return Login.toError(result);
       }
-    });
+    }
+  });
+
+  protected async logout(): Promise<void> {
+    await this.authService.logout();
   }
 
-  public async logout(): Promise<void> {
-    await this.authService.logout();
-    this.userName.set(null);
-    this.loginFormModel.set(Login.DEFAULT_LOGIN_FORM_MODEL);
+  private resetForm(): void {
+    this.loginModel.set(Login.emptyLoginModel);
     this.loginForm().reset();
   }
 
-  private async doLoginCheck(): Promise<void> {
-    const user = await this.userService.getUser();
-    this.userName.set(user?.username ?? null);
+  private static toError(result: Exclude<LoginResult, 'success'>): ValidationError {
+    switch (result) {
+      case 'invalidCredentials':
+        // don't tell the user whether the username or the password was wrong
+        return { kind: 'invalidCredentials', message: 'Username or password is incorrect' };
+      case 'tooManyAttempts':
+        return { kind: 'tooManyAttempts', message: 'Too many attempts - please try again in a minute' };
+      case 'error':
+        return { kind: 'error', message: 'Login failed - please try again later' };
+    }
   }
 }
 

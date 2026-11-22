@@ -1,38 +1,23 @@
-import { HttpContextToken, HttpEvent, HttpHandlerFn, HttpRequest } from "@angular/common/http";
-import { from, lastValueFrom, Observable } from "rxjs";
-import { inject } from "@angular/core";
-import { AuthService } from "./auth-service";
+import { HttpContextToken, HttpInterceptorFn } from '@angular/common/http';
+import { inject } from '@angular/core';
+import { from, switchMap } from 'rxjs';
+import { AuthService } from './auth-service';
+import { API_BASE_URL } from '../const';
 
-export const TOKEN_INTERCEPTION_DISABLED = new HttpContextToken<boolean>(() =>  false);
-export function tokenInterceptor(req: HttpRequest<unknown>, next: HttpHandlerFn): Observable<HttpEvent<unknown>> {
-  if (req.context.get(TOKEN_INTERCEPTION_DISABLED)) {
+export const TOKEN_INTERCEPTION_DISABLED = new HttpContextToken<boolean>(() => false);
+
+export const tokenInterceptor: HttpInterceptorFn = (req, next) => {
+  // Only ever send our token to our own API - never to other servers (CDNs, third party APIs, ...)!
+  if (req.context.get(TOKEN_INTERCEPTION_DISABLED) || !req.url.startsWith(API_BASE_URL)) {
     return next(req);
   }
 
-  return from(handle(req, next));
-}
-
-async function handle(req: HttpRequest<any>, next: HttpHandlerFn) {
-  const token = await getToken();
-  let newReq;
-  if (!token) {
-    newReq = req;
-  } else {
-    newReq = req.clone({
-      setHeaders: {
-        Authorization: `Bearer ${token}`
-      }
-    });
-  }
-
-  return lastValueFrom(next(newReq));
-}
-
-async function getToken(): Promise<string | null> {
+  // inject has to be called synchronously, before any async operation
   const authService = inject(AuthService);
-  const accessToken = await authService.getAccessToken();
-  if (accessToken) {
-    return accessToken.token;
-  }
-  return null;
-}
+
+  return from(authService.getAccessToken()).pipe(
+    switchMap(token => next(token
+      ? req.clone({ setHeaders: { Authorization: `Bearer ${token}` } })
+      : req))
+  );
+};

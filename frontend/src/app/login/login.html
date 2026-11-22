@@ -1,45 +1,40 @@
-@let loggedIn = isLoggedIn();
 <mat-card class="login-card">
   <mat-card-header>
-    <mat-card-title>Login</mat-card-title>
+    <mat-card-title>{{ user() ? 'Logout' : 'Login' }}</mat-card-title>
   </mat-card-header>
-  <mat-card-content>
-    <form>
-      @if (!loggedIn) {
-        <div class="row">
-          <div class="col">
-            <mat-form-field class="full-width">
-              <input matInput placeholder="Username" [formField]="loginForm.username">
-              @for (error of loginForm.username().errors(); track error) {
-                <mat-error>{{ error }}</mat-error>
-              }
-            </mat-form-field>
-          </div>
-        </div>
-        <div class="row">
-          <div class="col">
-            <mat-form-field class="full-width">
-              <input matInput placeholder="Password" [formField]="loginForm.password" type="password">
-              @for (error of loginForm.password().errors(); track error) {
-                <mat-error>{{ error }}</mat-error>
-              }
-            </mat-form-field>
-          </div>
-        </div>
-      } @else {
-        <div>
-          You are logged in as {{ userName() }}
-        </div>
-      }
+  @if (user(); as user) {
+    <mat-card-content>
+      <p>You are logged in as <strong>{{ user.username }}</strong> (role: {{ roleName() }}).</p>
+    </mat-card-content>
+    <mat-card-actions class="actions">
+      <button matButton="outlined" type="button" (click)="logout()">Logout</button>
+    </mat-card-actions>
+  } @else {
+    <!-- formRoot: handles the submit event (button and enter key) and calls the form's submission action -->
+    <form [formRoot]="loginForm">
+      <mat-card-content>
+        <mat-form-field class="full-width">
+          <mat-label>Username</mat-label>
+          <input matInput [formField]="loginForm.username" autocomplete="username">
+          @for (error of loginForm.username().errors(); track $index) {
+            <mat-error>{{ error.message }}</mat-error>
+          }
+        </mat-form-field>
+        <mat-form-field class="full-width">
+          <mat-label>Password</mat-label>
+          <input matInput [formField]="loginForm.password" type="password" autocomplete="current-password">
+          @for (error of loginForm.password().errors(); track $index) {
+            <mat-error>{{ error.message }}</mat-error>
+          }
+        </mat-form-field>
+        <!-- errors of the whole form, returned by the submission action -->
+        @for (error of loginForm().errors(); track $index) {
+          <p class="form-error" role="alert">{{ error.message }}</p>
+        }
+      </mat-card-content>
+      <mat-card-actions class="actions">
+        <button matButton="filled" type="submit" [disabled]="loginForm().submitting()">Login</button>
+      </mat-card-actions>
     </form>
-  </mat-card-content>
-  <mat-card-actions class="actions">
-    <button mat-raised-button color="secondary" [disabled]="!loggedIn"
-            (click)="logout(); $event.preventDefault();">
-      Logout
-    </button>
-    <button mat-raised-button color="primary" [disabled]="loggedIn" (click)="submit()">
-      Login
-    </button>
-  </mat-card-actions>
+  }
 </mat-card>
