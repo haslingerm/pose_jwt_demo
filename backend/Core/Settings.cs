@@ -15,7 +15,6 @@ public sealed class AuthSettings
 {
     public const string SectionKey = "AuthSettings";
 
-    // HMAC-SHA256 requires a key of at least 256 bit = 32 bytes
     private const int MinSigningKeyBytes = 32;
 
     public required string TokenSigningKey { get; set; }
@@ -26,9 +25,6 @@ public sealed class AuthSettings
 
     public SymmetricSecurityKey CreateSigningKey() => new(Encoding.UTF8.GetBytes(TokenSigningKey));
 
-    /// <summary>
-    ///     Fail fast on startup instead of issuing insecure tokens (or crashing on the first login).
-    /// </summary>
     public void Validate()
     {
         if (string.IsNullOrWhiteSpace(TokenIssuer) || string.IsNullOrWhiteSpace(TokenAudience))

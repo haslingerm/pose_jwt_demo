@@ -22,8 +22,6 @@ public sealed class TimeHub : Hub<ITimeClient>
 
         await base.OnConnectedAsync();
     }
-
-    // no need to override OnDisconnectedAsync: SignalR removes closed connections from all groups automatically
 }
 
 public sealed class TimeUpdate

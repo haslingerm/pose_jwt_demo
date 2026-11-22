@@ -75,7 +75,6 @@ public sealed class RegisterRequest
                 .WithMessage("Only letters, digits, '_', '.' and '-' are allowed");
             RuleFor(x => x.Password)
                 .Length(UserLimits.PasswordMinLength, UserLimits.PasswordMaxLength);
-            // otherwise e.g. { "role": 42 } would be accepted as well
             RuleFor(x => x.Role).IsInEnum();
         }
     }

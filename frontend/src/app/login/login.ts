@@ -69,13 +69,16 @@ export class Login {
 
   private static toError(result: Exclude<LoginResult, 'success'>): ValidationError {
     switch (result) {
-      case 'invalidCredentials':
+      case 'invalidCredentials': {
         // don't tell the user whether the username or the password was wrong
         return { kind: 'invalidCredentials', message: 'Username or password is incorrect' };
-      case 'tooManyAttempts':
+      }
+      case 'tooManyAttempts': {
         return { kind: 'tooManyAttempts', message: 'Too many attempts - please try again in a minute' };
-      case 'error':
+      }
+      case 'error': {
         return { kind: 'error', message: 'Login failed - please try again later' };
+      }
     }
   }
 }

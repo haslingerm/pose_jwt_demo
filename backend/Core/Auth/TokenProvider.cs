@@ -21,16 +21,11 @@ public interface ITokenProvider
 
 internal sealed class TokenProvider(IOptions<AuthSettings> options, IClock clock) : ITokenProvider
 {
-    // 256 bit of cryptographically secure randomness - impossible to guess
     private const int RefreshTokenBytes = 32;
     private static readonly FrozenDictionary<UserRole, IReadOnlyList<Claim>> roleClaims = GetRoleClaims();
     private static readonly JsonWebTokenHandler tokenHandler = new();
     private readonly AuthSettings _settings = options.Value;
 
-    // HS256 = HMAC-SHA256: a symmetric algorithm, the same key is used to sign and to validate tokens.
-    // That is fine as long as only this backend creates and validates tokens. If other services had to validate
-    // our tokens as well, an asymmetric algorithm (e.g. RS256 or ES256) would be the better choice,
-    // because then those services only need the public key and cannot create tokens themselves.
     private readonly SigningCredentials _signingCredentials =
         new(options.Value.CreateSigningKey(), SecurityAlgorithms.HmacSha256);
 
@@ -52,11 +47,9 @@ internal sealed class TokenProvider(IOptions<AuthSettings> options, IClock clock
         // So never put secrets or sensitive personal data in there.
         Claim[] claims =
         [
-            // 'sub' (subject) is the standard claim for a stable, unique user identifier
             new(JwtRegisteredClaimNames.Sub, user.Id.ToString()),
             new(JwtRegisteredClaimNames.Name, user.Username),
             ..roleClaims[user.Role],
-            // unique token id - would allow us to revoke single access tokens via a blocklist
             new(JwtRegisteredClaimNames.Jti, Guid.CreateVersion7().ToString("N"))
         ];
 
@@ -118,8 +111,6 @@ internal sealed class TokenProvider(IOptions<AuthSettings> options, IClock clock
 
 public static class AuthClaimTypes
 {
-    // short claim names as used in the JWT itself - we disable the mapping to the long
-    // 'http://schemas.xmlsoap.org/...' claim types of the .NET framework (see Setup.AddAuth)
     public const string Role = "role";
     public const string Name = JwtRegisteredClaimNames.Name;
 }

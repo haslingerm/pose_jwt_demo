@@ -10,8 +10,6 @@ public partial class _20261122065817_RefreshTokenSha256AndUsernameCollation : Mi
     /// <inheritdoc />
     protected override void Up(MigrationBuilder migrationBuilder)
     {
-        // refresh tokens are now hashed with SHA-256 instead of salted PBKDF2 - existing ones can no longer be
-        // verified, so we remove them (affected users simply have to log in again)
         migrationBuilder.Sql("DELETE FROM ActiveRefreshTokens;");
 
         migrationBuilder.DropColumn(

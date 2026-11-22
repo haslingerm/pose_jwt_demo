@@ -11,11 +11,6 @@ export class ProductService {
   private readonly baseUrl = `${API_BASE_URL}/products`;
   private readonly client = inject(HttpClient);
 
-  /**
-   * Creates a signal based resource of all products (value, isLoading, error, reload, ...).
-   * Has to be called in an injection context, e.g. a field initializer of a component.
-   * The interceptor adds the bearer token automatically, as for every HttpClient request.
-   */
   public createProductsResource(): HttpResourceRef<IProduct[]> {
     return httpResource(() => this.baseUrl, {
       parse: data => ProductsWire.parse(data),
@@ -46,18 +41,22 @@ export class ProductService {
       }
 
       switch (error.status) {
-        case HttpStatusCode.Unauthorized:
+        case HttpStatusCode.Unauthorized: {
           console.log('Unauthenticated user cannot update price');
           break;
-        case HttpStatusCode.Forbidden:
+        }
+        case HttpStatusCode.Forbidden: {
           console.log('User does not have permission to update price');
           break;
-        case HttpStatusCode.NotFound:
+        }
+        case HttpStatusCode.NotFound: {
           console.log('Product not found');
           break;
-        default:
+        }
+        default: {
           console.error('An error occurred while updating product price:', error.status);
           break;
+        }
       }
       return false;
     }

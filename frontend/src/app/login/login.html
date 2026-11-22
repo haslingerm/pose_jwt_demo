@@ -10,7 +10,6 @@
       <button matButton="outlined" type="button" (click)="logout()">Logout</button>
     </mat-card-actions>
   } @else {
-    <!-- formRoot: handles the submit event (button and enter key) and calls the form's submission action -->
     <form [formRoot]="loginForm">
       <mat-card-content>
         <mat-form-field class="full-width">
@@ -27,7 +26,6 @@
             <mat-error>{{ error.message }}</mat-error>
           }
         </mat-form-field>
-        <!-- errors of the whole form, returned by the submission action -->
         @for (error of loginForm().errors(); track $index) {
           <p class="form-error" role="alert">{{ error.message }}</p>
         }

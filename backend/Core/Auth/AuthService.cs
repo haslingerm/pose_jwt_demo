@@ -11,8 +11,6 @@ namespace JwtDemo.Core.Auth;
 /// </summary>
 public readonly record struct InvalidCredentials;
 
-// C# 15 union types: the result is exactly one of the listed types, and the compiler checks
-// that a switch expression handles all of them
 public union LoginResult(NewToken, InvalidCredentials);
 
 public union LogoutResult(Success, InvalidCredentials);
@@ -112,8 +110,5 @@ internal sealed class AuthService(ITokenProvider tokenProvider, IClock clock, IU
         user.ActiveRefreshTokens.RemoveAll(token => token.Expiration < now);
     }
 
-    // Why no slow, salted hash (like for passwords) here? Passwords are chosen by humans, are often weak and reused,
-    // so we have to make guessing them expensive. A refresh token consists of 256 random bits - guessing it is
-    // impossible anyway, so a fast cryptographic hash is sufficient (and keeps token refreshes cheap).
     private static byte[] HashRefreshToken(string refreshToken) => SHA256.HashData(Encoding.UTF8.GetBytes(refreshToken));
 }

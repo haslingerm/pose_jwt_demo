@@ -7,7 +7,6 @@ var builder = WebApplication.CreateBuilder(args);
 
 var isDev = builder.Environment.IsDevelopment();
 
-// Minimal APIs use the HTTP JSON options (not the MVC ones, which only apply to controllers)
 builder.Services.ConfigureHttpJsonOptions(o => JsonConfig.ConfigureJsonSerialization(o.SerializerOptions, isDev));
 builder.Services.AddSignalR()
        .AddJsonProtocol(o =>

@@ -67,13 +67,16 @@ export class AuthService {
       }
 
       switch (error.status) {
-        case HttpStatusCode.Unauthorized:
+        case HttpStatusCode.Unauthorized: {
           return 'invalidCredentials';
-        case HttpStatusCode.TooManyRequests:
+        }
+        case HttpStatusCode.TooManyRequests: {
           return 'tooManyAttempts';
-        default:
+        }
+        default: {
           console.error(`Failed to login: ${error.status}`);
           return 'error';
+        }
       }
     }
   }

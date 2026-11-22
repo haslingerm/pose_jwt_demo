@@ -11,7 +11,6 @@ public static class JsonConfig
     {
         options.DefaultIgnoreCondition = JsonIgnoreCondition.Never;
         options.PropertyNameCaseInsensitive = true;
-        // a missing 'required' property or null for a non-nullable property is rejected with 400 Bad Request
         options.RespectNullableAnnotations = true;
         options.RespectRequiredConstructorParameters = true;
         options.ReferenceHandler = ReferenceHandler.IgnoreCycles;

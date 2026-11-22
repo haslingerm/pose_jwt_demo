@@ -52,7 +52,8 @@ export class Products {
   private readonly dialog = inject(MatDialog);
   private readonly snackbar = inject(MatSnackBar);
 
-  // loads the products as soon as the component is created
+  // No ngOnInit/await needed: an httpResource has to be created in an injection context (like this field
+  // initializer), starts loading by itself and provides value, isLoading and error as signals
   protected readonly products = this.productService.createProductsResource();
   private readonly updating = signal(false);
   protected readonly loading = computed(() => this.products.isLoading() || this.updating());
@@ -86,9 +87,12 @@ export class Products {
 
     if (!success) {
       this.snackbar.open('Updating the price failed', 'Close', { duration: 4000 });
+      return;
     }
 
-    // a local update instead of a full reload would be more efficient
-    this.products.reload();
+    // update the loaded list locally instead of reloading all products from the backend
+    this.products.update(products => products.map(p => p.id === productId
+      ? { ...p, price: newPrice }
+      : p));
   }
 }

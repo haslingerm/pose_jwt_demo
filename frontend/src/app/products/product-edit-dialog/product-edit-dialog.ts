@@ -13,9 +13,6 @@ import { MatInput } from '@angular/material/input';
 import { form, FormField, FormRoot, max, min, required } from '@angular/forms/signals';
 import { IProduct } from '../../../core/product/product-service';
 
-/**
- * Closes with the new price - or undefined, if the user cancelled.
- */
 @Component({
   selector: 'app-product-edit-dialog',
   imports: [
@@ -37,7 +34,6 @@ export class ProductEditDialog {
   private readonly dialogRef = inject<MatDialogRef<ProductEditDialog, number>>(MatDialogRef);
   protected readonly product = inject<IProduct>(MAT_DIALOG_DATA);
 
-  // null: the number input is empty
   private readonly priceModel = signal<{ price: number | null }>({ price: this.product.price });
   protected readonly priceForm = form(this.priceModel, path => {
     // same rules as in the backend - the backend has to validate anyway, this is just for a better user experience
