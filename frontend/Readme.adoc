@@ -1,13 +1,33 @@
+:icons: font
+
 = JWT Demo -- Frontend
 
-This angular project shows how to:
+This Angular project shows how to:
 
 * Retrieve a JWT from a backend server
 * Store access token and refresh token in local storage
-** An HTTP-only cookie (only sent to the refresh url) would also be a sensible option!
 * Intercept the HTTP requests and add the access token to the headers
-* Automatically refresh the access token when it expires
-** One could add a timer here as well, but there should be some timeout at least
+** Only for requests to our own API -- never send the token to other servers!
+* Automatically refresh the access token when it (is about to) expire
+** Making sure only one refresh request is sent at a time: refresh tokens can only be used once
 * Use the JWT token with a SignalR hub
+* Derive the login state (user, roles) from the token with signals -- the UI updates automatically on login, logout or a failed refresh
 
-Built for Angular 18 zoneless mode.
+Built with Angular 22: zoneless, signal based components (OnPush), signal forms and `httpResource`.
+
+IMPORTANT: Everything in the browser can be manipulated by the user.
+The frontend only _reads_ the token (it cannot and must not validate it) to improve the UI -- e.g. hide buttons or routes.
+The actual security is the backend, which validates the token on every request.
+
+== Where to store the tokens?
+
+This demo uses local storage: simple, and the login survives a page reload.
+The downside: any JavaScript running on the page can read it -- so an XSS vulnerability (or a malicious npm package) could steal the tokens.
+
+Common alternatives:
+
+* Keep the access token in memory only and the refresh token in an `HttpOnly`, `Secure`, `SameSite=Strict` cookie, which is only sent to the refresh endpoint.
+JavaScript cannot read such a cookie at all.
+This requires CORS with credentials and some CSRF protection in the backend.
+* A 'Backend for Frontend' (BFF): the tokens never reach the browser, the BFF keeps them and uses a session cookie with the frontend.
+This is the approach currently recommended for SPAs.
