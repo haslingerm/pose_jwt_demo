@@ -3,12 +3,76 @@
 = JWT Demo -- Backend
 
 Creates and stores JWT and refresh tokens for users.
-A simple SQLite database is used to store data, so this project can be run as-is without any additional setup.
+A simple SQLite database is used to store data, so this project can be run as-is without any additional setup -- except for the signing key.
 
-TIP: Take a look at link:./JwtDemo.http[`JwtDemo.http`] for a full run through all the endpoints (creating user, logging in, retrieving data, refreshing token).
+IMPORTANT: The backend needs the JWT signing key in its user secrets (development) or an environment variable (deployed).
+See link:../Readme.adoc#secrets[Secrets: Signing Key & User Secrets] in the main Readme -- in short:
+`dotnet user-secrets set "AuthSettings:TokenSigningKey" "$(openssl rand -base64 48)"`
+
+== Trying it out
+
+TIP: Take a look at link:./JwtDemo.http[`JwtDemo.http`] for a full run through all the endpoints (creating user, logging in, retrieving data, refreshing token, logging out).
+Swagger UI is available at `/swagger` during development -- use the 'Authorize' button to enter an access token.
 
 No production grade security is implemented in this demo!
-Just some sensible defaults -- except for the one endpoint that allows users to register as administrators, that one is just plain evil 😉.
-Also, there is no validation, no logging and not the cleanst architecture -- take those parts from other, dedicated examples!
+Just sensible defaults -- except for the one endpoint that allows users to register as administrators, that one is just plain evil 😉 (and therefore only mapped during development).
+Also, the architecture is kept simple (a single project) -- take a look at the layered template for a cleaner structure.
 
 Take it as a starting point for your own implementation.
+
+== Structure
+
+[cols="1,3"]
+|===
+|Folder |Content
+
+|`Endpoints`
+|The HTTP layer: one static class per resource (`AuthEndpoints`, `ProductEndpoints`, `UserEndpoints`) with its route group, the endpoint methods, request/response DTOs and their validators
+
+|`Core`
+|Services, repositories, unit of work, database context and the setup of the application (`Setup.cs`) -- this layer knows nothing about HTTP
+
+|`Core/Auth`
+|Everything about passwords and tokens: `PasswordHasher`, `TokenProvider`, `AuthService`
+
+|`Hubs`, `BackgroundServices`
+|The SignalR time hub and the service sending the time updates
+
+|`Util`
+|Request validation helpers and the `GlobalExceptionHandler`
+|===
+
+== Minimal API Endpoints
+
+The endpoints are ASP.NET Core minimal APIs, organized like this:
+
+* Each resource has its own static endpoint class with a `Map...Endpoints` extension method, which creates a *route group*.
+`Setup.MapApplicationEndpoints` calls them explicitly -- no controllers, no reflection.
+* *Authorization* is configured on the route group or the single endpoint:
+** `RequireAuthorization(nameof(UserRole.User))` on the product group and additionally `RequireAuthorization(nameof(UserRole.Admin))` on the price update -- policies add up, so both have to be satisfied
+** `AllowAnonymous()` on the auth group and the registration -- all other endpoints require a logged-in user because of the fallback policy (see `Setup.AddAuth`)
+** `RequireRateLimiting(...)` on the auth group and the registration
+* The registration endpoint is only *mapped during development* -- in production it simply does not exist.
+* *Typed results*: every endpoint declares all its possible responses, e.g. `Task<Results<Ok<TokenResponse>, ValidationProblem, UnauthorizedHttpResult>>`.
+The compiler checks that only those are returned, and the OpenAPI document lists them automatically.
+* *Validation* is explicit: each request DTO has a nested FluentValidation `Validator`, which the endpoint runs before starting a transaction:
+`if (new LoginRequest.Validator().Check(request) is { } validationProblem) { return validationProblem; }`
+Invalid requests are answered with an RFC 9457 validation problem, with the property names as they appear in the JSON.
+* *Service results* are C# 15 unions (e.g. `union LoginResult(NewToken, InvalidCredentials)`), translated into HTTP results with an exhaustive `switch` expression -- the compiler complains if a case is missing.
+* *Transactions*: the endpoint begins the transaction and commits only in the success branch (`CommitAndReturnAsync`).
+Everything else -- failed results and exceptions -- is rolled back automatically when the request ends.
+* *Errors*: unhandled exceptions and malformed requests (e.g. invalid JSON, missing required properties) are handled centrally by the `GlobalExceptionHandler`: logged, and answered with a generic problem details response -- never with exception details.
+
+== Deployment
+
+* The backend does not use HTTPS itself: in production it has to run behind a reverse proxy, which terminates TLS (and sends the HSTS header).
+Tokens are as good as passwords -- they must never travel unencrypted over a network!
+* The forwarded headers middleware takes the real client IP from the `X-Forwarded-For` header of the proxy -- important for the rate limiting, otherwise all users would share the limit of the proxy's IP.
+Only headers from trusted proxies are accepted (default: localhost) -- configure `KnownProxies`/`KnownIPNetworks` in `Setup.ConfigureForwardedHeaders` for your setup.
+* Provide the signing key and the production settings as environment variables, see link:../Readme.adoc#secrets[the main Readme].
+
+== Notable C# Features
+
+* C# 15 union types for service results
+* C# 14 extension blocks (`extension(IEndpointRouteBuilder app) { ... }`) for endpoint mapping, setup and helpers
+* C# 14 `field` keyword (see `UnitOfWork`)

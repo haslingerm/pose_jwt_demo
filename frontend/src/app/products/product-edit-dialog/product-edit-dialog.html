@@ -1,11 +1,16 @@
-<h2 mat-dialog-title>Update {{product.name}} (#{{product.id}})</h2>
-<mat-dialog-content>
-  <mat-form-field>
-    <mat-label>Price</mat-label>
-    <input matInput [(ngModel)]="product.price">
-  </mat-form-field>
-</mat-dialog-content>
-<mat-dialog-actions>
-  <button mat-button (click)="onNoClick()">Cancel</button>
-  <button mat-button [mat-dialog-close]="product.price">Ok</button>
-</mat-dialog-actions>
+<form [formRoot]="priceForm">
+  <h2 mat-dialog-title>Update {{ product.name }} (#{{ product.id }})</h2>
+  <mat-dialog-content>
+    <mat-form-field>
+      <mat-label>Price</mat-label>
+      <input matInput type="number" step="0.01" [formField]="priceForm.price">
+      @for (error of priceForm.price().errors(); track $index) {
+        <mat-error>{{ error.message }}</mat-error>
+      }
+    </mat-form-field>
+  </mat-dialog-content>
+  <mat-dialog-actions align="end">
+    <button matButton type="button" mat-dialog-close>Cancel</button>
+    <button matButton="filled" type="submit">Save</button>
+  </mat-dialog-actions>
+</form>

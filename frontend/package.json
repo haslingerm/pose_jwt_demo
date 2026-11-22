@@ -6,33 +6,30 @@
     "start": "ng serve",
     "build": "ng build",
     "watch": "ng build --watch --configuration development",
-    "test": "ng test",
     "analyze-bundle": "ng build --configuration=analyze-bundle && source-map-explorer dist/**/*.js --no-border-checks"
   },
   "private": true,
   "dependencies": {
-    "@angular/animations": "^21.1.2",
-    "@angular/cdk": "^21.1.2",
-    "@angular/common": "^21.1.2",
-    "@angular/compiler": "^21.1.2",
-    "@angular/core": "^21.1.2",
-    "@angular/forms": "^21.1.2",
-    "@angular/material": "^21.1.2",
-    "@angular/platform-browser": "^21.1.2",
-    "@angular/platform-browser-dynamic": "^21.1.2",
-    "@angular/router": "^21.1.2",
-    "@js-joda/core": "^5.7.0",
-    "@microsoft/signalr": "10.0.0",
+    "@angular/cdk": "^22.3.0",
+    "@angular/common": "^22.3.0",
+    "@angular/compiler": "^22.3.0",
+    "@angular/core": "^22.3.0",
+    "@angular/forms": "^22.3.0",
+    "@angular/material": "^22.3.0",
+    "@angular/platform-browser": "^22.3.0",
+    "@angular/router": "^22.3.0",
+    "@js-joda/core": "^6.3.2",
+    "@microsoft/signalr": "^11.0.0",
     "jwt-decode": "^4.0.0",
-    "rxjs": "~7.8.0",
-    "tslib": "^2.3.0",
-    "zod": "^4.3.6"
+    "rxjs": "~7.8.2",
+    "tslib": "^2.9.1",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
-    "@angular/build": "^21.1.2",
-    "@angular/cli": "^21.1.2",
-    "@angular/compiler-cli": "^21.1.2",
+    "@angular/build": "^22.3.0",
+    "@angular/cli": "^22.3.0",
+    "@angular/compiler-cli": "^22.3.0",
     "source-map-explorer": "^2.5.3",
-    "typescript": "~5.9.3"
+    "typescript": "~6.0.3"
   }
 }

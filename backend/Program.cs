@@ -1,21 +1,21 @@
-using System.Text.Json.Serialization;
 using JwtDemo.BackgroundServices;
 using JwtDemo.Core;
-using JwtDemo.Hubs;
-using Microsoft.AspNetCore.Mvc;
 using NodaTime;
 using NodaTime.Serialization.SystemTextJson;
 
 var builder = WebApplication.CreateBuilder(args);
 
-builder.Services.AddControllers();
+var isDev = builder.Environment.IsDevelopment();
+
+builder.Services.ConfigureHttpJsonOptions(o => JsonConfig.ConfigureJsonSerialization(o.SerializerOptions, isDev));
 builder.Services.AddSignalR()
        .AddJsonProtocol(o =>
        {
            o.PayloadSerializerOptions.ConfigureForNodaTime(DateTimeZoneProviders.Tzdb);
        });
-builder.Services.AddEndpointsApiExplorer();
-builder.Services.ConfigureSwagger();
+builder.Services.ConfigureProblemDetails();
+builder.Services.ConfigureOpenApi();
+builder.Services.ConfigureForwardedHeaders();
 builder.Services.LoadConfiguration(builder.Configuration);
 builder.Services.RegisterServices();
 builder.Services.AddAuth(builder.Configuration);
@@ -23,30 +23,29 @@ builder.Services.AddRateLimiting();
 builder.Services.ConfigureCors(builder.Configuration);
 builder.Services.ConfigureDatabase(builder.Configuration);
 builder.Services.AddHostedService<TimeUpdateService>();
-builder.Services.Configure<JsonOptions>(o =>
-{
-    o.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter());
-    o.JsonSerializerOptions.ConfigureForNodaTime(DateTimeZoneProviders.Tzdb);
-});
+Setup.ConfigureValidation();
 
 var app = builder.Build();
 
-if (app.Environment.IsDevelopment())
+await app.UpdateDatabase();
+
+// Not using HTTPS here: in production the backend _has_ to run behind a reverse proxy, which handles TLS (and HSTS).
+// Tokens are as good as passwords - they must never be sent unencrypted over a network!
+app.UseForwardedHeaders();
+app.UseExceptionHandler();
+
+if (isDev)
 {
-    app.UseSwagger();
-    app.UseSwaggerUI();
+    app.MapOpenApi().AllowAnonymous();
+    app.UseSwaggerUI(o => o.SwaggerEndpoint("/openapi/v1.json", "JWT Demo"));
 }
 
 app.UseCors(Setup.CorsPolicyName);
 app.UseRateLimiter();
-app.UseHttpsRedirection();
-
-await app.UpdateDatabase();
 
 app.UseAuthentication();
 app.UseAuthorization();
 
-app.MapControllers();
-app.MapHub<TimeHub>("hubs/time").RequireCors(Setup.CorsPolicyName);
+app.MapApplicationEndpoints(isDev);
 
-app.Run();
+await app.RunAsync();

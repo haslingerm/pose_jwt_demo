@@ -1,6 +1,6 @@
-import { inject, Injectable } from "@angular/core";
-import { AuthService } from "../auth/auth-service";
-import { jwtDecode } from "jwt-decode";
+import { computed, inject, Injectable, Signal } from '@angular/core';
+import { AuthService } from '../auth/auth-service';
+import { decodeAccessToken } from '../auth/access-token';
 
 @Injectable({
   providedIn: 'root'
@@ -8,66 +8,52 @@ import { jwtDecode } from "jwt-decode";
 export class UserService {
   private readonly authService = inject(AuthService);
 
-  public async getUser(): Promise<IUser | null> {
-    const token = await this.authService.getAccessToken();
-    if (token) {
-      return UserService.decodeToken(token.token);
-    }
-    return null;
-  }
+  // derived from the access token - updates automatically on login, logout and token refresh
+  public readonly user: Signal<IUser | null> = computed(() => {
+    const accessToken = this.authService.accessToken();
+    return accessToken ? UserService.toUser(accessToken.token) : null;
+  });
+  public readonly isLoggedIn: Signal<boolean> = computed(() => this.user() !== null);
 
-  public async isLoggedIn(): Promise<boolean> {
-    const user = await this.getUser();
-    return user !== null;
-  }
-
-  public async hasRole(role: UserRole): Promise<boolean> {
-    const user = await this.getUser();
-
+  /**
+   * Reactive when called within a template, computed or effect (because it reads the user signal).
+   */
+  public hasRole(role: UserRole): boolean {
     // this works because we assume that higher roles contain all permissions of lower roles
     // and the enum values are ordered accordingly
-    return user !== null && user.role >= role;
+    return (this.user()?.role ?? UserRole.Unknown) >= role;
   }
 
-  public static decodeToken(accessToken: string): IUser | null {
-    const decoded = jwtDecode(accessToken) as IAccessToken;
-
-    if (!decoded) {
+  private static toUser(accessToken: string): IUser | null {
+    const claims = decodeAccessToken(accessToken);
+    if (!claims) {
       return null;
     }
 
-    const roles = decoded.role as string[];
-    let role: UserRole;
-    if (roles.includes("Admin")) {
-      role = UserRole.Admin;
-    } else if (roles.includes("User")) {
-      role = UserRole.User;
-    } else if (roles.includes("Guest")) {
-      role = UserRole.Guest;
-    } else {
-      role = UserRole.Unknown;
-    }
+    const roles = claims.role;
+    const role = roles.includes('Admin') ? UserRole.Admin
+      : roles.includes('User') ? UserRole.User
+        : roles.includes('Guest') ? UserRole.Guest
+          : UserRole.Unknown;
 
     return {
-      username: decoded.name,
-      role: role
+      id: claims.sub,
+      username: claims.name,
+      role
     };
   }
 }
 
-interface IAccessToken {
-  name: string;
-  role: string[];
-}
-
 export interface IUser {
+  id: string;
   username: string;
   role: UserRole;
 }
 
 export enum UserRole {
+  // has to be the lowest value, so it never satisfies a role check
+  Unknown = -1,
   Guest = 0,
   User = 5,
-  Admin = 20,
-  Unknown = 100
+  Admin = 20
 }

@@ -1,47 +1,40 @@
 ﻿using JwtDemo.Core.Auth;
-using UnionGen;
 
 namespace JwtDemo.Core.Users;
 
-public partial interface IUserService
+public readonly record struct DuplicateUsername;
+
+public union AddUserResult(User, DuplicateUsername);
+
+public interface IUserService
 {
     public ValueTask<AddUserResult> AddNewUser(string username, string password, UserRole role);
-    public ValueTask<GetUserResult> GetByUsername(string username);
-
-    [Union<User, DuplicateUsername>]
-    public readonly partial struct AddUserResult;
-
-    public readonly record struct DuplicateUsername;
 }
 
-public sealed class UserService(IUnitOfWork unitOfWork, IAuthService authService) : IUserService
+public sealed class UserService(IUnitOfWork unitOfWork) : IUserService
 {
-    public async ValueTask<IUserService.AddUserResult> AddNewUser(string username, string password, UserRole role)
+    public async ValueTask<AddUserResult> AddNewUser(string username, string password, UserRole role)
     {
-        // in a real world scenario, we would have password criteria/validation
-        // so the following is just a minimal example
+        // basic length checks are done by the request model validation (see RegisterRequest),
+        // a real application might add more password rules or check against known breached passwords
 
         var repo = unitOfWork.UserRepository;
-        var existingUserResult = await repo.GetByUsername(username);
-        if (existingUserResult.IsUser)
+        if (await repo.GetByUsername(username) is User)
         {
-            return new IUserService.DuplicateUsername();
+            return new DuplicateUsername();
         }
 
-        var hashedPassword = authService.HashPassword(password);
+        var hashedPassword = PasswordHasher.Hash(password);
         var newUser = new User
         {
             Role = role,
             Username = username,
-            PasswordHash = hashedPassword.PasswordHash,
-            PasswordSalt = hashedPassword.Salt,
-            ActiveRefreshTokens = []
+            PasswordHash = hashedPassword.Hash,
+            PasswordSalt = hashedPassword.Salt
         };
 
         repo.Add(newUser);
 
         return newUser;
     }
-
-    public ValueTask<GetUserResult> GetByUsername(string username) => unitOfWork.UserRepository.GetByUsername(username);
 }

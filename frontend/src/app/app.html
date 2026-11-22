@@ -4,43 +4,42 @@
                [mode]="isHandset() ? 'over' : 'side'"
                [opened]="!isHandset()">
     <mat-toolbar>
-      @if(isHandset()) {
-        <button
-          type="button"
-          aria-label="Toggle sidenav"
-          mat-icon-button
-          (click)="drawer.toggle()">
-          <mat-icon aria-label="Side nav toggle icon">menu</mat-icon>
-        </button>
+      @if (showTitleInSidenav()) {
+        <span>{{ title }}</span>
+      } @else {
         <span>Menu</span>
-      }
-      @if(showTitleInSidenav()){
-        <span>{{title}}</span>
       }
     </mat-toolbar>
     <mat-nav-list>
-      <a mat-list-item routerLink="/home">Home</a>
-      <a mat-list-item routerLink="/login">Login</a>
-      <a mat-list-item routerLink="/products">Products</a>
+      <a mat-list-item routerLink="/home" routerLinkActive #home="routerLinkActive" [activated]="home.isActive">Home</a>
+      <a mat-list-item routerLink="/login" routerLinkActive #login="routerLinkActive" [activated]="login.isActive">
+        {{ user() ? 'Logout' : 'Login' }}
+      </a>
+      <a mat-list-item routerLink="/products" routerLinkActive #products="routerLinkActive" [activated]="products.isActive">
+        Products
+      </a>
     </mat-nav-list>
   </mat-sidenav>
   <mat-sidenav-content>
-    <mat-toolbar color="primary">
+    <mat-toolbar>
       @if (isHandset()) {
         <button
           type="button"
           aria-label="Toggle sidenav"
-          mat-icon-button
+          matIconButton
           (click)="drawer.toggle()">
-          <mat-icon aria-label="Side nav toggle icon">menu</mat-icon>
+          <mat-icon aria-hidden="true">menu</mat-icon>
         </button>
+        <span>{{ title }}</span>
       }
-      @if(showTitleInMainToolbar()) {
-        <span>{{title}}</span>
+      <span class="spacer"></span>
+      @if (user(); as user) {
+        <mat-icon aria-hidden="true">person</mat-icon>
+        <span class="username">{{ user.username }}</span>
       }
     </mat-toolbar>
-    <div id="main-container">
-      <router-outlet></router-outlet>
-    </div>
+    <main id="main-container">
+      <router-outlet/>
+    </main>
   </mat-sidenav-content>
 </mat-sidenav-container>

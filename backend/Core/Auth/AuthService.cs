@@ -1,93 +1,82 @@
-﻿using System.Diagnostics.CodeAnalysis;
-using System.Security.Cryptography;
+﻿using System.Security.Cryptography;
 using System.Text;
 using JwtDemo.Core.Users;
 using NodaTime;
-using NodaTime.Extensions;
-using UnionGen;
-using UnionGen.Types;
 
 namespace JwtDemo.Core.Auth;
 
-public partial interface IAuthService
+/// <summary>
+///     Returned for a wrong username, password or refresh token - on purpose, we do not tell the caller which
+///     one was wrong, so attackers cannot find out which usernames exist.
+/// </summary>
+public readonly record struct InvalidCredentials;
+
+public union LoginResult(NewToken, InvalidCredentials);
+
+public union LogoutResult(Success, InvalidCredentials);
+
+public interface IAuthService
 {
-    public ValueTask<LoginResult> AttemptLogin(string username, string suppliedPlaintextPassword);
-    public ValueTask<LoginResult> AttemptTokenRefresh(string username, string suppliedRefreshToken);
-    public HashedPassword HashPassword(string plaintext);
+    public ValueTask<LoginResult> AttemptLogin(string username, string password);
+    public ValueTask<LoginResult> AttemptTokenRefresh(string username, string refreshToken);
     public ValueTask<LogoutResult> AttemptLogout(string username, string refreshToken);
-
-    [Union<Success<ITokenProvider.NewToken>, NotFound, Failure>]
-    public readonly partial struct LoginResult;
-
-    [Union<Success, NotFound>]
-    public readonly partial struct LogoutResult;
-
-    public sealed record HashedPassword(byte[] PasswordHash, byte[] Salt);
 }
 
 internal sealed class AuthService(ITokenProvider tokenProvider, IClock clock, IUnitOfWork unitOfWork) : IAuthService
 {
-    private const int KeySize = 64;
-    private const int Iterations = 200_000;
-
-    private readonly ZonedClock _clock = clock.InUtc();
-
-    public async ValueTask<IAuthService.LoginResult> AttemptLogin(string username, string suppliedPlaintextPassword)
+    public async ValueTask<LoginResult> AttemptLogin(string username, string password)
     {
-        var userResult = await unitOfWork.UserRepository.GetByUsername(username);
-        if (userResult.IsNotFound)
+        if (await unitOfWork.UserRepository.GetByUsername(username) is not User user)
         {
-            return new Failure();
+            // still spend the time to hash the password, so the response time does not reveal that the user does not exist
+            PasswordHasher.SimulateVerify(password);
+
+            return new InvalidCredentials();
         }
 
-        var user = userResult.AsUser();
-
-        if (!IsPasswordValid())
+        if (!PasswordHasher.Verify(password, new HashedPassword(user.PasswordHash, user.PasswordSalt)))
         {
-            return new Failure();
+            return new InvalidCredentials();
         }
 
-        var token = tokenProvider.CreateToken(user);
-        UpdateUserRefreshToken(token.RefreshToken);
+        RemoveExpiredRefreshTokens(user);
 
-        return new Success<ITokenProvider.NewToken>(token);
-
-        bool IsPasswordValid()
-        {
-            var passwordBytes = GetPasswordBytes(suppliedPlaintextPassword);
-            var hashedPassword = new HashedPassword(user.PasswordHash, user.PasswordSalt);
-
-            return VerifyPassword(passwordBytes, hashedPassword);
-        }
-
-        void UpdateUserRefreshToken(ITokenProvider.TokenData refreshToken)
-        {
-            RemoveExpiredRefreshTokens(user);
-            AddNewRefreshToken(user, refreshToken);
-        }
+        return IssueNewToken(user);
     }
 
-    public IAuthService.HashedPassword HashPassword(string plaintext)
+    public async ValueTask<LoginResult> AttemptTokenRefresh(string username, string refreshToken)
     {
-        var hashedPassword = HashPassword(GetPasswordBytes(plaintext));
-
-        return new IAuthService.HashedPassword(hashedPassword.PasswordHash.ToArray(), hashedPassword.Salt.ToArray());
-    }
-
-    public async ValueTask<IAuthService.LogoutResult> AttemptLogout(string username, string refreshToken)
-    {
-        // we could also create a blocklist to revoke the access token, but given the short expiration time,
-        // we won't bother with that added complexity this time
-        var userResult = await unitOfWork.UserRepository.GetByUsername(username);
-        if (userResult.IsNotFound)
+        if (await unitOfWork.UserRepository.GetByUsername(username) is not User user)
         {
-            return new NotFound();
+            return new InvalidCredentials();
         }
 
-        var user = userResult.AsUser();
-        if (!TryFindRefreshToken(user, GetPasswordBytes(refreshToken), out var activeRefreshToken))
+        RemoveExpiredRefreshTokens(user);
+
+        if (FindRefreshToken(user, refreshToken) is not { } activeRefreshToken)
         {
-            return new NotFound();
+            // A real application should also detect the reuse of an already used (rotated) refresh token:
+            // that is a strong sign the token was stolen, so all refresh tokens of the user should be revoked.
+            return new InvalidCredentials();
+        }
+
+        // Refresh token rotation: every refresh token can be used exactly once, we hand out a new one each time.
+        // If an attacker steals a refresh token, it becomes useless as soon as the real user refreshes.
+        user.ActiveRefreshTokens.Remove(activeRefreshToken);
+
+        // the new access token is created based on the current user data, so role changes are applied now
+        return IssueNewToken(user);
+    }
+
+    public async ValueTask<LogoutResult> AttemptLogout(string username, string refreshToken)
+    {
+        // We only revoke the refresh token. The access token stays valid until it expires - we could add
+        // a blocklist (based on the 'jti' claim) to revoke it immediately, but given the short lifetime of
+        // access tokens we won't bother with that added complexity in this demo.
+        if (await unitOfWork.UserRepository.GetByUsername(username) is not User user
+            || FindRefreshToken(user, refreshToken) is not { } activeRefreshToken)
+        {
+            return new InvalidCredentials();
         }
 
         user.ActiveRefreshTokens.Remove(activeRefreshToken);
@@ -95,97 +84,31 @@ internal sealed class AuthService(ITokenProvider tokenProvider, IClock clock, IU
         return new Success();
     }
 
-    public async ValueTask<IAuthService.LoginResult> AttemptTokenRefresh(string username, string suppliedRefreshToken)
+    private NewToken IssueNewToken(User user)
     {
-        var userResult = await unitOfWork.UserRepository.GetByUsername(username);
-        if (userResult.IsNotFound)
-        {
-            return new Failure();
-        }
-
-        var user = userResult.AsUser();
-        var refreshResult = AttemptRefresh();
-
-        return refreshResult;
-
-        IAuthService.LoginResult AttemptRefresh()
-        {
-            RemoveExpiredRefreshTokens(user);
-
-            if (!TryFindRefreshToken(user, GetPasswordBytes(suppliedRefreshToken), out var refreshToken))
-            {
-                return new Failure();
-            }
-
-            user.ActiveRefreshTokens.Remove(refreshToken);
-
-            var token = tokenProvider.CreateToken(user);
-            AddNewRefreshToken(user, token.RefreshToken);
-
-            return new Success<ITokenProvider.NewToken>(token);
-        }
-    }
-
-    private static bool TryFindRefreshToken(User user, ReadOnlySpan<byte> tokenBytes,
-                                            [NotNullWhen(true)] out ActiveRefreshToken? refreshToken)
-    {
-        foreach (var activeRefreshToken in user.ActiveRefreshTokens)
-        {
-            var hashedProvidedToken = HashPassword(tokenBytes, activeRefreshToken.TokenSalt);
-            if (hashedProvidedToken.SequenceEqual(activeRefreshToken.TokenHash))
-            {
-                refreshToken = activeRefreshToken;
-
-                return true;
-            }
-        }
-
-        refreshToken = null;
-
-        return false;
-    }
-
-    private static void AddNewRefreshToken(User user, ITokenProvider.TokenData refreshToken)
-    {
-        var hashedRefreshToken = HashPassword(GetPasswordBytes(refreshToken.Token));
+        var token = tokenProvider.CreateToken(user);
         user.ActiveRefreshTokens.Add(new ActiveRefreshToken
         {
-            Expiration = refreshToken.Expiration,
-            TokenHash = hashedRefreshToken.PasswordHash.ToArray(),
-            TokenSalt = hashedRefreshToken.Salt.ToArray()
+            // like passwords, refresh tokens are only stored as a hash: a leaked database does not leak usable tokens
+            TokenHash = HashRefreshToken(token.RefreshToken.Token),
+            Expiration = token.RefreshToken.Expiration
         });
+
+        return token;
     }
 
-    private static HashedPassword HashPassword(ReadOnlySpan<byte> plaintext)
+    private static ActiveRefreshToken? FindRefreshToken(User user, string refreshToken)
     {
-        ReadOnlySpan<byte> salt = RandomNumberGenerator.GetBytes(KeySize);
-        var hash = HashPassword(plaintext, salt);
+        var tokenHash = HashRefreshToken(refreshToken);
 
-        return new HashedPassword(hash, salt);
-    }
-
-    private static bool VerifyPassword(ReadOnlySpan<byte> plaintext, HashedPassword hashedPassword)
-    {
-        var hashToCompare = HashPassword(plaintext, hashedPassword.Salt);
-
-        return hashToCompare.SequenceEqual(hashedPassword.PasswordHash);
+        return user.ActiveRefreshTokens.Find(t => CryptographicOperations.FixedTimeEquals(t.TokenHash, tokenHash));
     }
 
     private void RemoveExpiredRefreshTokens(User user)
     {
-        var now = _clock.GetCurrentInstant();
+        var now = clock.GetCurrentInstant();
         user.ActiveRefreshTokens.RemoveAll(token => token.Expiration < now);
     }
 
-    private static ReadOnlySpan<byte> GetPasswordBytes(string plaintext) => Encoding.UTF8.GetBytes(plaintext);
-
-    private static ReadOnlySpan<byte> HashPassword(ReadOnlySpan<byte> plaintext, ReadOnlySpan<byte> salt) =>
-        Rfc2898DeriveBytes.Pbkdf2(plaintext, salt,
-                                  Iterations, HashAlgorithmName.SHA512, KeySize);
-
-    private readonly ref struct HashedPassword(ReadOnlySpan<byte> passwordHash, ReadOnlySpan<byte> salt)
-    {
-        public ReadOnlySpan<byte> PasswordHash { get; } = passwordHash;
-        public ReadOnlySpan<byte> Salt { get; } = salt;
-    }
+    private static byte[] HashRefreshToken(string refreshToken) => SHA256.HashData(Encoding.UTF8.GetBytes(refreshToken));
 }

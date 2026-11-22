@@ -1,6 +1,8 @@
-@BaseUrl = https://localhost:7029
+# matches the 'http' launch profile (default for 'dotnet run'), use https://localhost:7029 for the 'https' profile
+@BaseUrl = http://localhost:5106
 
-### User Registration - just for demo purposes, don't do that for real!
+### User Registration - just for demo purposes, don't do that for real! (only available during development)
+# a second registration with the same (case-insensitive) username fails with 409 Conflict
 POST {{BaseUrl}}/api/users/registrations
 Content-Type: application/json
 
@@ -53,6 +55,16 @@ Content-Type: application/json
   "Price": 22
 }
 
+### Wrong password - 401, the same response as for an unknown user (don't reveal which usernames exist)
+# send this more than 20 times within a minute and the rate limiter kicks in (429)
+POST {{BaseUrl}}/api/auth/logins
+Content-Type: application/json
+
+{
+  "Username": "User1",
+  "Password": "WrongPassword"
+}
+
 ### User token refresh - we don't need to send a bearer token
 POST {{BaseUrl}}/api/auth/token-refreshes
 Content-Type: application/json
@@ -64,10 +76,20 @@ Content-Type: application/json
 
 > {%
     const res = response.body;
+    client.global.set('previousUserRefreshToken', client.global.get('userRefreshToken'));
     client.global.set('userAccessToken', res.accessToken.token);
     client.global.set('userRefreshToken', res.refreshToken.token);
     client.log('User Token updated!');
 %}
+
+### Reusing the old refresh token fails with 401 - each refresh token can only be used once (rotation)
+POST {{BaseUrl}}/api/auth/token-refreshes
+Content-Type: application/json
+
+{
+  "Username": "User1",
+  "RefreshToken": "{{previousUserRefreshToken}}"
+}
 
 ### User tries to get all products, with refreshed token - works
 GET {{BaseUrl}}/api/products
@@ -106,3 +128,21 @@ Content-Type: application/json
 ### Admin checks if price was updated
 GET {{BaseUrl}}/api/products/2
 Authorization: Bearer {{adminAccessToken}}
+
+### User logout - revokes the refresh token
+POST {{BaseUrl}}/api/auth/logouts
+Content-Type: application/json
+
+{
+  "Username": "User1",
+  "RefreshToken": "{{userRefreshToken}}"
+}
+
+### Refresh after logout fails with 401 (the access token stays valid until it expires!)
+POST {{BaseUrl}}/api/auth/token-refreshes
+Content-Type: application/json
+
+{
+  "Username": "User1",
+  "RefreshToken": "{{userRefreshToken}}"
+}

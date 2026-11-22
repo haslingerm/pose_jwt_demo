@@ -1,19 +1,16 @@
-﻿using UnionGen;
-using UnionGen.Types;
+﻿namespace JwtDemo.Core.Products;
 
-namespace JwtDemo.Core.Products;
+public readonly record struct ProductNotFound;
 
-public partial interface IProductService
+public union GetProductResult(Product, ProductNotFound);
+
+public union PriceUpdateResult(Success, ProductNotFound);
+
+public interface IProductService
 {
     public ValueTask<IReadOnlyCollection<Product>> GetAllProducts();
     public ValueTask<GetProductResult> GetProductById(int productId);
-    public ValueTask<PriceUpdateResult> UpdateProductPrice(int productId, decimal requestPrice);
-
-    [Union<Product, NotFound>]
-    public readonly partial struct GetProductResult;
-
-    [Union<Success, NotFound>]
-    public readonly partial struct PriceUpdateResult;
+    public ValueTask<PriceUpdateResult> UpdateProductPrice(int productId, decimal newPrice);
 }
 
 // not really relevant for this demo - basic implementation for completeness
@@ -21,25 +18,19 @@ internal sealed class ProductService(IUnitOfWork unitOfWork) : IProductService
 {
     public ValueTask<IReadOnlyCollection<Product>> GetAllProducts() => unitOfWork.ProductRepository.GetAllProducts();
 
-    public async ValueTask<IProductService.GetProductResult> GetProductById(int productId)
-    {
-        var product = await unitOfWork.ProductRepository.GetById(productId);
-
-        return product is not null
+    public async ValueTask<GetProductResult> GetProductById(int productId) =>
+        await unitOfWork.ProductRepository.GetById(productId) is { } product
             ? product
-            : new NotFound();
-    }
+            : new ProductNotFound();
 
-    public async ValueTask<IProductService.PriceUpdateResult> UpdateProductPrice(int productId, decimal requestPrice)
+    public async ValueTask<PriceUpdateResult> UpdateProductPrice(int productId, decimal newPrice)
     {
-        var product = await unitOfWork.ProductRepository.GetById(productId);
-
-        if (product is null)
+        if (await unitOfWork.ProductRepository.GetById(productId) is not { } product)
         {
-            return new NotFound();
+            return new ProductNotFound();
         }
 
-        product.Price = requestPrice;
+        product.Price = newPrice;
 
         return new Success();
     }
