@@ -10,10 +10,11 @@ namespace JwtDemo.BackgroundServices;
 public sealed class TimeUpdateService(
     IClock clock,
     IHubContext<TimeHub, ITimeClient> hubContext,
-    IOptions<Settings> options) : BackgroundService
+    IOptions<Settings> options,
+    ILogger<TimeUpdateService> logger) : BackgroundService
 {
     private const int LowQualityUpdateInterval = 5;
-    private readonly Settings _settings = options.Value;
+    private readonly DateTimeZone _timezone = DateTimeZoneProviders.Tzdb[options.Value.Timezone];
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -23,7 +24,16 @@ public sealed class TimeUpdateService(
 
             var now = GetLocalTime();
             var sendToUsersOnly = now.Second % LowQualityUpdateInterval != 0;
-            await SendTimeUpdate(now, sendToUsersOnly);
+
+            try
+            {
+                await SendTimeUpdate(now, sendToUsersOnly);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // an unhandled exception would stop the background service (and by default the whole application)
+                logger.LogError(ex, "Failed to send time update");
+            }
         }
     }
 
@@ -31,37 +41,26 @@ public sealed class TimeUpdateService(
     {
         // If sending the update to all clients would take longer than our 1-second interval, we'd have to be smarter here.
         // Luckily, we only have a few clients in this demo, so we can afford to be lazy.
-        
-        var update = new TimeUpdate
-        {
-            CurrentTime = currentTime,
-            Quality = TimeQuality.High
-        };
-        await hubContext.Clients.Group(TimeHub.AuthenticatedGroupName).ReceiveTime(update);
+
+        await hubContext.Clients.Group(TimeHub.AuthenticatedGroupName)
+                        .ReceiveTime(new TimeUpdate { CurrentTime = currentTime, Quality = TimeQuality.High });
 
         if (sendToUsersOnly)
         {
             return;
         }
 
-        update.Quality = TimeQuality.Low;
-        await hubContext.Clients.Group(TimeHub.UnauthenticatedGroupName).ReceiveTime(update);
+        await hubContext.Clients.Group(TimeHub.UnauthenticatedGroupName)
+                        .ReceiveTime(new TimeUpdate { CurrentTime = currentTime, Quality = TimeQuality.Low });
     }
 
     private Duration GetDurationUntilNextFullSecond()
     {
-        var now = GetLocalTime();
-        var nextFullSecond = now.PlusSeconds(1).With(TimeAdjusters.TruncateToSecond);
-        var diff = nextFullSecond - now;
+        var now = clock.GetCurrentInstant();
+        var nextFullSecond = Instant.FromUnixTimeSeconds(now.ToUnixTimeSeconds() + 1);
 
-        return diff.ToDuration();
+        return nextFullSecond - now;
     }
 
-    private LocalDateTime GetLocalTime()
-    {
-        var timezone = DateTimeZoneProviders.Tzdb[_settings.Timezone];
-        var zonedTime = clock.GetCurrentInstant().InZone(timezone);
-
-        return zonedTime.LocalDateTime;
-    }
+    private LocalDateTime GetLocalTime() => clock.GetCurrentInstant().InZone(_timezone).LocalDateTime;
 }

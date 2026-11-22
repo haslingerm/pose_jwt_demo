@@ -1,23 +1,23 @@
-﻿using System.Text;
-using System.Threading.RateLimiting;
+﻿using System.Threading.RateLimiting;
 using JwtDemo.Core.Auth;
 using JwtDemo.Core.Products;
 using JwtDemo.Core.Users;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
-using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi;
 using NodaTime;
-using NodaTime.Extensions;
 
 namespace JwtDemo.Core;
 
 public static class Setup
 {
     public const string CorsPolicyName = "CorsPolicy";
-    public const string RateLimitPolicyName = "RateLimitPolicy";
-    
+    public const string AuthRateLimitPolicyName = "AuthRateLimitPolicy";
+    public const string HubBasePath = "/hubs";
+
+    // C# 14 extension block: all members in here are extension members for IServiceCollection
     extension(IServiceCollection services)
     {
         public void LoadConfiguration(IConfiguration configuration)
@@ -29,10 +29,13 @@ public static class Setup
         public void RegisterServices()
         {
             services.AddTransient<IAuthService, AuthService>();
-            services.AddTransient<ITokenProvider, TokenProvider>();
+            services.AddSingleton<ITokenProvider, TokenProvider>();
 
-            services.AddScoped<IUnitOfWork, UnitOfWork>();
-            services.AddScoped<ITransactionProvider, UnitOfWork>();
+            // one UnitOfWork instance per request, available via both interfaces
+            services.AddScoped<UnitOfWork>();
+            services.AddScoped<IUnitOfWork>(sp => sp.GetRequiredService<UnitOfWork>());
+            services.AddScoped<ITransactionProvider>(sp => sp.GetRequiredService<UnitOfWork>());
+
             services.AddScoped<IUserService, UserService>();
             services.AddScoped<IProductService, ProductService>();
 
@@ -41,65 +44,53 @@ public static class Setup
 
         public void AddAuth(IConfiguration configuration)
         {
-            var settings = configuration.GetSection(AuthSettings.SectionKey).Get<AuthSettings>();
-            var tokenSigningKey = settings?.TokenSigningKey;
-            var tokenIssuer = settings?.TokenIssuer;
-            var tokenAudience = settings?.TokenAudience;
+            var settings = configuration.GetSection(AuthSettings.SectionKey).Get<AuthSettings>()
+                           ?? throw new InvalidOperationException("JWT settings are missing");
+            settings.Validate();
 
-            if (string.IsNullOrWhiteSpace(tokenSigningKey)
-                || string.IsNullOrWhiteSpace(tokenIssuer)
-                || string.IsNullOrWhiteSpace(tokenAudience))
-            {
-                throw new InvalidOperationException("JWT settings are missing");
-            }
-
-            var signingKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(tokenSigningKey));
-            var clockSkew = Duration.FromSeconds(1);
-            var clock = SystemClock.Instance.InUtc();
-
-            services.AddAuthentication(o =>
-                    {
-                        o.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
-                        o.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
-                    })
+            services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
                     .AddJwtBearer(o =>
                     {
-                        o.SaveToken = true;
+                        // keep the claim names as they are in the token ('name', 'role', 'sub'), instead of
+                        // mapping them to the long legacy 'http://schemas.xmlsoap.org/...' claim types
+                        o.MapInboundClaims = false;
                         o.TokenValidationParameters = new TokenValidationParameters
                         {
+                            // the signature proves that we created the token and nobody tampered with it
                             ValidateIssuerSigningKey = true,
+                            IssuerSigningKey = settings.CreateSigningKey(),
+                            // Only accept the algorithm we use ourselves. Otherwise, an attacker could try to make us
+                            // validate a token with a different (e.g. weaker or 'none') algorithm.
+                            ValidAlgorithms = [SecurityAlgorithms.HmacSha256],
+
                             ValidateIssuer = true,
+                            ValidIssuer = settings.TokenIssuer,
                             ValidateAudience = true,
+                            ValidAudience = settings.TokenAudience,
+
                             ValidateLifetime = true,
+                            RequireExpirationTime = true,
+                            // Tolerance for clocks of different servers not being perfectly in sync. The default is
+                            // 5 minutes, which would be long compared to our access token lifetime. We create and
+                            // validate the tokens on the same server, so a small value is sufficient.
+                            ClockSkew = TimeSpan.FromSeconds(5),
 
-                            IssuerSigningKey = signingKey,
-                            ValidIssuer = tokenIssuer,
-                            ValidAudience = tokenAudience,
-                            ClockSkew = clockSkew.ToTimeSpan(),
-                            LifetimeValidator = (nb, ex, _, _) =>
-                            {
-                                var nbInstant = Instant.FromDateTimeUtc(nb ?? DateTime.MaxValue);
-                                var exInstant = Instant.FromDateTimeUtc(ex ?? DateTime.MinValue);
-
-                                var now = clock.GetCurrentInstant();
-                                var notBefore = nbInstant.Plus(clockSkew * -1);
-                                var expires = exInstant.Plus(clockSkew);
-
-                                return now >= notBefore && now <= expires;
-                            }
+                            NameClaimType = AuthClaimTypes.Name,
+                            RoleClaimType = AuthClaimTypes.Role
                         };
 
-                        // this is required for SignalR
-                        // it will take the token from the query string on the connection request
-                        // and move it to the token property of the context to be processed as normal
                         o.Events = new JwtBearerEvents
                         {
                             OnMessageReceived = context =>
                             {
+                                // This is required for SignalR: browsers cannot send an Authorization header
+                                // when opening a WebSocket, so the client sends the token in the query string.
+                                // We take it from there and process it as usual - but only for hub requests,
+                                // since URLs (and thus the token) might end up in logs.
                                 var accessToken = context.Request.Query["access_token"];
                                 var path = context.HttpContext.Request.Path;
 
-                                if (!string.IsNullOrWhiteSpace(accessToken) && path.StartsWithSegments("/hubs"))
+                                if (!string.IsNullOrWhiteSpace(accessToken) && path.StartsWithSegments(HubBasePath))
                                 {
                                     context.Token = accessToken;
                                 }
@@ -109,34 +100,46 @@ public static class Setup
                         };
                     });
 
-            services.AddAuthorization(o =>
+            var authorization = services.AddAuthorizationBuilder()
+                                        // Secure by default: every endpoint requires an authenticated user, unless it
+                                        // explicitly opts out with [AllowAnonymous]. So forgetting an [Authorize]
+                                        // attribute does not accidentally open up an endpoint.
+                                        .SetFallbackPolicy(new AuthorizationPolicyBuilder()
+                                                           .RequireAuthenticatedUser()
+                                                           .Build());
+
+            // one policy per role, named like the role - e.g. [Authorize(nameof(UserRole.Admin))]
+            foreach (var role in Enum.GetNames<UserRole>())
             {
-                foreach (var role in Enum.GetNames<UserRole>())
-                {
-                    o.AddPolicy(role, p => p.RequireRole(role));
-                }
-            });
+                authorization.AddPolicy(role, p => p.RequireRole(role));
+            }
         }
 
-        public void ConfigureSwagger()
+        public void ConfigureOpenApi()
         {
-            services.AddSwaggerGen(c =>
+            services.AddOpenApi(o => o.AddDocumentTransformer((document, _, _) =>
             {
-                c.SwaggerDoc("v1", new OpenApiInfo
+                // allows us to enter the access token in the Swagger UI ('Authorize' button)
+                const string SchemeName = "Bearer";
+                document.Components ??= new OpenApiComponents();
+                document.Components.SecuritySchemes ??= new Dictionary<string, IOpenApiSecurityScheme>();
+                document.Components.SecuritySchemes[SchemeName] = new OpenApiSecurityScheme
                 {
-                    Title = "JWT Demo",
-                    Version = "v1"
-                });
-                c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
-                {
-                    Name = "Authorization",
-                    Type = SecuritySchemeType.ApiKey,
-                    Scheme = "Bearer",
+                    Type = SecuritySchemeType.Http,
+                    Scheme = "bearer",
                     BearerFormat = "JWT",
-                    In = ParameterLocation.Header,
-                    Description = "JWT Authorization header using the Bearer scheme"
-                });
-            });
+                    Description = "JWT access token, as returned by the login endpoint"
+                };
+                document.Security =
+                [
+                    new OpenApiSecurityRequirement
+                    {
+                        [new OpenApiSecuritySchemeReference(SchemeName, document)] = []
+                    }
+                ];
+
+                return Task.CompletedTask;
+            }));
         }
 
         public void ConfigureCors(IConfiguration configuration)
@@ -153,10 +156,11 @@ public static class Setup
             {
                 o.AddPolicy(CorsPolicyName, b =>
                 {
+                    // Only our own frontend may call the API from a browser - never use AllowAnyOrigin with auth!
+                    // We don't need AllowCredentials: the token is sent in the Authorization header, not in a cookie.
                     b.WithOrigins(corsOrigin)
                      .AllowAnyMethod()
-                     .AllowAnyHeader()
-                     .AllowCredentials();
+                     .AllowAnyHeader();
                 });
             });
         }
@@ -181,31 +185,35 @@ public static class Setup
 
         public void AddRateLimiting()
         {
-            services.AddRateLimiter(o => o.AddSlidingWindowLimiter(policyName: RateLimitPolicyName, options =>
+            services.AddRateLimiter(o =>
             {
-                options.PermitLimit = 100;
-                options.Window = Duration.FromSeconds(30).ToTimeSpan();
-                options.QueueProcessingOrder = QueueProcessingOrder.OldestFirst;
-                options.QueueLimit = 100;
-                options.SegmentsPerWindow = 3;
-            }));
+                // 429 is the correct status code (the default would be 503 Service Unavailable)
+                o.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+
+                // Each client (IP address) gets its own limit: this slows down password guessing, while an attacker
+                // cannot lock out all other users. Behind a reverse proxy, you'd have to configure the
+                // ForwardedHeaders middleware, otherwise all requests would seem to come from the proxy's IP.
+                o.AddPolicy(AuthRateLimitPolicyName, context =>
+                                RateLimitPartition.GetFixedWindowLimiter(
+                                    context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                                    _ => new FixedWindowRateLimiterOptions
+                                    {
+                                        PermitLimit = 20,
+                                        Window = TimeSpan.FromMinutes(1),
+                                        QueueLimit = 0
+                                    }));
+            });
         }
     }
 
-    extension(IApplicationBuilder app)
+    extension(WebApplication app)
     {
         public async ValueTask UpdateDatabase()
         {
             // in a real application you would apply migrations manually after reviewing them
 
-            using var serviceScope =
-                app.ApplicationServices.GetRequiredService<IServiceScopeFactory>().CreateScope();
-            await using var context = serviceScope.ServiceProvider.GetService<DatabaseContext>();
-
-            if (context is null)
-            {
-                throw new InvalidOperationException("Database context not available in service provider");
-            }
+            await using var serviceScope = app.Services.CreateAsyncScope();
+            var context = serviceScope.ServiceProvider.GetRequiredService<DatabaseContext>();
 
             await context.Database.MigrateAsync();
             await InsertDefaultProducts(context);
@@ -214,9 +222,7 @@ public static class Setup
 
             static async ValueTask InsertDefaultProducts(DatabaseContext context)
             {
-                var existing = await context.Products.AnyAsync();
-
-                if (existing)
+                if (await context.Products.AnyAsync())
                 {
                     return;
                 }

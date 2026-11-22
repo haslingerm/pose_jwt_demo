@@ -17,56 +17,32 @@ public sealed class ProductController(IProductService productService, ITransacti
     {
         var products = await productService.GetAllProducts();
 
-        return Ok(products.Select(ToDto));
+        return Ok(products.Select(p => p.ToDto()));
     }
 
-    [HttpGet]
-    [Route("{productId:int}")]
-    public async ValueTask<ActionResult<ProductDto>> GetById([FromRoute] int productId)
-    {
-        var productResult = await productService.GetProductById(productId);
+    [HttpGet("{productId:int}")]
+    public async ValueTask<ActionResult<ProductDto>> GetById([FromRoute] int productId) =>
+        await productService.GetProductById(productId) switch
+        {
+            Product product => Ok(product.ToDto()),
+            ProductNotFound => NotFound()
+        };
 
-        return productResult
-            .Match<ActionResult<ProductDto>>(product => Ok(product),
-                                             _ => NotFound());
-    }
-
-    [HttpPatch]
+    // policies are combined: the user needs to be authorized by the controller ([Authorize(User)])
+    // AND by this method ([Authorize(Admin)]) - a token without the Admin role results in 403 Forbidden
+    [HttpPatch("{productId:int}/price")]
     [Authorize(nameof(UserRole.Admin))]
-    [Route("{productId:int}/price")]
     public async ValueTask<IActionResult> UpdatePrice([FromRoute] int productId,
                                                       [FromBody] ProductPriceUpdateRequest request)
     {
-        try
+        await transaction.BeginTransactionAsync();
+
+        var updateResult = await productService.UpdateProductPrice(productId, request.Price);
+
+        return updateResult switch
         {
-            await transaction.BeginTransactionAsync();
-
-            // for this demo, we don't care about validation
-            var updateResult = await productService.UpdateProductPrice(productId, request.Price);
-
-            return await updateResult
-                .MatchAsync<IActionResult>(async _ =>
-                                           {
-                                               await transaction.CommitAsync();
-
-                                               return NoContent();
-                                           },
-                                           _ => ValueTask.FromResult<IActionResult>(NotFound()));
-        }
-        catch (Exception ex)
-        {
-            await transaction.RollbackAsync();
-            Console.WriteLine(ex.Message);
-
-            return Problem();
-        }
-    }
-
-    private static ProductDto ToDto(Product product) =>
-        new()
-        {
-            Id = product.Id,
-            Name = product.Name,
-            Price = product.Price
+            Success => await transaction.CommitAndReturn(NoContent()),
+            ProductNotFound => NotFound()
         };
+    }
 }

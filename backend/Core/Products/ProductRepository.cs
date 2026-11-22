@@ -10,12 +10,8 @@ public interface IProductRepository
 
 public sealed class ProductRepository(DbSet<Product> products) : IProductRepository
 {
-    public async ValueTask<IReadOnlyCollection<Product>> GetAllProducts() => await products.ToListAsync();
+    public async ValueTask<IReadOnlyCollection<Product>> GetAllProducts() =>
+        await products.OrderBy(p => p.Id).ToListAsync();
 
-    public async ValueTask<Product?> GetById(int productId)
-    {
-        var product = await products.FindAsync(productId);
-
-        return product;
-    }
+    public ValueTask<Product?> GetById(int productId) => products.FindAsync(productId);
 }

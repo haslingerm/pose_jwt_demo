@@ -9,121 +9,55 @@ namespace JwtDemo.Controllers;
 
 [ApiController]
 [AllowAnonymous]
+// all auth endpoints are rate limited, so attackers cannot try thousands of passwords or refresh tokens
+[EnableRateLimiting(Setup.AuthRateLimitPolicyName)]
 [Route("api/auth")]
 public sealed class AuthController(IAuthService authService, ITransactionProvider transaction) : ControllerBase
 {
-    [HttpPost]
-    [EnableRateLimiting(Setup.RateLimitPolicyName)]
-    [Route("logins")]
+    // Unhandled exceptions don't need a try/catch here: the transaction is rolled back automatically
+    // (see UnitOfWork) and the exception handler middleware logs them and returns a 500 response.
+
+    [HttpPost("logins")]
     public async ValueTask<ActionResult<TokenResponse>> Login([FromBody] LoginRequest request)
     {
-        try
-        {
-            await transaction.BeginTransactionAsync();
+        await transaction.BeginTransactionAsync();
 
-            var loginResult = await authService.AttemptLogin(request.Username, request.Password);
+        var loginResult = await authService.AttemptLogin(request.Username, request.Password);
 
-            return await loginResult
-                .MatchAsync<ActionResult<TokenResponse>>(async success =>
-                                                         {
-                                                             await transaction.CommitAsync();
-
-                                                             var token = success.Value;
-                                                             var response = ToResponse(token);
-
-                                                             return Ok(response);
-                                                         },
-                                                         // we don't return a 404 in this case, to not leak information about which users might be valid
-                                                         _ => ValueTask
-                                                             .FromResult<ActionResult<TokenResponse>>(Unauthorized()),
-                                                         _ => ValueTask
-                                                             .FromResult<ActionResult<TokenResponse>>(Unauthorized()));
-        }
-        catch (Exception ex)
-        {
-            await transaction.RollbackAsync();
-
-            // no logging configured in this auth demo project
-            Console.WriteLine(ex.Message);
-
-            return Problem();
-        }
+        return await ToTokenResponse(loginResult);
     }
 
-    [HttpPost]
-    [Route("logouts")]
-    public async ValueTask<IActionResult> Logout([FromBody] LogoutRequest request)
-    {
-        try
-        {
-            await transaction.BeginTransactionAsync();
-
-            var logoutResult = await authService.AttemptLogout(request.Username, request.RefreshToken);
-
-            return await logoutResult
-                .MatchAsync<IActionResult>(async _ =>
-                                           {
-                                               await transaction.CommitAsync();
-
-                                               return NoContent();
-                                           },
-                                           // no 400 response here, again to not leak information about which users might be valid
-                                           _ => ValueTask.FromResult<IActionResult>(Unauthorized()));
-        }
-        catch (Exception ex)
-        {
-            await transaction.RollbackAsync();
-            Console.WriteLine(ex.Message);
-
-            return Problem();
-        }
-    }
-
-    [HttpPost]
-    [Route("token-refreshes")]
+    // we don't need to send the (probably already expired) access token here, the refresh token is the credential
+    [HttpPost("token-refreshes")]
     public async ValueTask<ActionResult<TokenResponse>> Refresh([FromBody] TokenRefreshRequest request)
     {
-        try
-        {
-            await transaction.BeginTransactionAsync();
+        await transaction.BeginTransactionAsync();
 
-            var refreshResult = await authService.AttemptTokenRefresh(request.Username, request.RefreshToken);
+        var refreshResult = await authService.AttemptTokenRefresh(request.Username, request.RefreshToken);
 
-            return await refreshResult
-                .MatchAsync<ActionResult<TokenResponse>>(async success =>
-                                                    {
-                                                        await transaction.CommitAsync();
-
-                                                        var token = success.Value;
-                                                        var response = ToResponse(token);
-
-                                                        return Ok(response);
-                                                    },
-                                                    // same reason as before, no 404 in this special case
-                                                    _ => ValueTask.FromResult<ActionResult<TokenResponse>>(Unauthorized()),
-                                                    _ => ValueTask.FromResult<ActionResult<TokenResponse>>(Unauthorized()));
-        } catch (Exception ex)
-        {
-            await transaction.RollbackAsync();
-            Console.WriteLine(ex.Message);
-
-            return Problem();
-        }
+        return await ToTokenResponse(refreshResult);
     }
 
-    private static TokenResponse ToResponse(ITokenProvider.NewToken token)
+    [HttpPost("logouts")]
+    public async ValueTask<IActionResult> Logout([FromBody] LogoutRequest request)
     {
-        return new TokenResponse
-        {
-            AccessToken = ToDto(token.AccessToken),
-            RefreshToken = ToDto(token.RefreshToken)
-        };
+        await transaction.BeginTransactionAsync();
 
-        static TokenDataDto ToDto(ITokenProvider.TokenData tokenData) =>
-            new()
-            {
-                Token = tokenData.Token,
-                Expiration = tokenData.Expiration
-            };
+        var logoutResult = await authService.AttemptLogout(request.Username, request.RefreshToken);
+
+        return logoutResult switch
+        {
+            Success => await transaction.CommitAndReturn(NoContent()),
+            InvalidCredentials => Unauthorized()
+        };
     }
+
+    private async ValueTask<ActionResult<TokenResponse>> ToTokenResponse(LoginResult result) =>
+        // the compiler checks that we handle every case of the union - no default branch required
+        result switch
+        {
+            NewToken token => await transaction.CommitAndReturn(Ok(token.ToResponse())),
+            // Always the same 401 - no 404 for unknown users etc. - so we don't leak which usernames exist
+            InvalidCredentials => Unauthorized()
+        };
 }

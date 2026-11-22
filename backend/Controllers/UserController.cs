@@ -3,44 +3,43 @@ using JwtDemo.Core.Users;
 using JwtDemo.Model;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 
 namespace JwtDemo.Controllers;
 
 [ApiController]
-[Authorize]
 [Route("api/users")]
-public sealed class UserController(IUserService userService, ITransactionProvider transaction) : ControllerBase
+public sealed class UserController(
+    IUserService userService,
+    ITransactionProvider transaction,
+    IHostEnvironment environment) : ControllerBase
 {
     #region Insecure Demo Code - Ignore!
 
-    // !! This is obviously just a placeholder, don't let anonymous requests create new users !!
-    [HttpPost]
+    // !! This is obviously just a placeholder: anonymous users can register themselves - even as Admin !!
+    // To limit the damage, the endpoint is only available during development.
+    // A real application would e.g. let users register with the lowest role only (+ email verification)
+    // and only allow admins to assign higher roles.
+    [HttpPost("registrations")]
     [AllowAnonymous]
-    [Route("registrations")]
+    [EnableRateLimiting(Setup.AuthRateLimitPolicyName)]
     public async ValueTask<IActionResult> Register([FromBody] RegisterRequest request)
     {
-        try
+        if (!environment.IsDevelopment())
         {
-            await transaction.BeginTransactionAsync();
-
-            var addNewResult = await userService.AddNewUser(request.Username, request.Password, request.Role);
-
-            return await addNewResult
-                .MatchAsync<IActionResult>(async _ =>
-                                           {
-                                               await transaction.CommitAsync();
-
-                                               return Created();
-                                           },
-                                           _ => ValueTask.FromResult<IActionResult>(BadRequest()));
+            return NotFound();
         }
-        catch (Exception ex)
+
+        await transaction.BeginTransactionAsync();
+
+        var addNewResult = await userService.AddNewUser(request.Username, request.Password, request.Role);
+
+        return addNewResult switch
         {
-            await transaction.RollbackAsync();
-            Console.WriteLine(ex.Message);
-
-            return Problem();
-        }
+            // 'User _' instead of just 'User', because the latter would refer to the ControllerBase.User property
+            User _ => await transaction.CommitAndReturn(Created()),
+            DuplicateUsername => Conflict()
+        };
     }
 
     #endregion

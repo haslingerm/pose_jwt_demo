@@ -7,14 +7,14 @@ namespace JwtDemo.Core;
 
 public sealed class DatabaseContext(DbContextOptions<DatabaseContext> options) : DbContext(options)
 {
-    public required DbSet<User> Users { get; set; }
-    public required DbSet<ActiveRefreshToken> ActiveRefreshTokens { get; set; }
-    public required DbSet<Product> Products { get; set; }
+    public DbSet<User> Users => Set<User>();
+    public DbSet<ActiveRefreshToken> ActiveRefreshTokens => Set<ActiveRefreshToken>();
+    public DbSet<Product> Products => Set<Product>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
-        
+
         ConfigureUser(modelBuilder);
         ConfigureActiveRefreshToken(modelBuilder);
         ConfigureProduct(modelBuilder);
@@ -25,6 +25,7 @@ public sealed class DatabaseContext(DbContextOptions<DatabaseContext> options) :
         var product = modelBuilder.Entity<Product>();
         product.HasKey(p => p.Id);
         product.Property(p => p.Id).ValueGeneratedOnAdd();
+        product.Property(p => p.Name).HasMaxLength(100);
     }
 
     private static void ConfigureActiveRefreshToken(ModelBuilder modelBuilder)
@@ -34,6 +35,7 @@ public sealed class DatabaseContext(DbContextOptions<DatabaseContext> options) :
         // gives us nicely ordered v7 Guids
         activeRefreshToken.Property(a => a.Id).ValueGeneratedOnAdd();
         activeRefreshToken.HasIndex(a => a.UserId);
+        activeRefreshToken.HasIndex(a => a.TokenHash).IsUnique();
     }
 
     private static void ConfigureUser(ModelBuilder modelBuilder)
@@ -41,7 +43,8 @@ public sealed class DatabaseContext(DbContextOptions<DatabaseContext> options) :
         var user = modelBuilder.Entity<User>();
         user.HasKey(u => u.Id);
         user.Property(u => u.Id).ValueGeneratedOnAdd();
-        user.Property(u => u.Username).HasMaxLength(60);
+        // case-insensitive: otherwise 'Admin' and 'admin' could be registered as two different (confusable) users
+        user.Property(u => u.Username).HasMaxLength(60).UseCollation("NOCASE");
         user.HasIndex(u => u.Username).IsUnique();
         user.HasMany(u => u.ActiveRefreshTokens)
             .WithOne()
